@@ -1,0 +1,8 @@
+.DS_Store
+*.bak
+*.tmp
+~$*
+backup/
+screenshots/
+*.xlsx
+*.pdf
