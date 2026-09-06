@@ -1,7 +1,7 @@
 // app.js — MOU 69 V1 render layer. Reads MOU_DATA (mou_data.js) through engine.js only —
 // never re-derives scoring formulas here (V1 brief §8/§30).
 
-const LV_COLORS = { 1: '#e2554f', 2: '#ef9483', 3: '#e3a82e', 4: '#5bc69a', 5: '#1f9d6f', null: '#dcdad3' };
+const LV_COLORS = { 1: '#c4392e', 2: '#cf8a6e', 3: '#b8862f', 4: '#6f9c7f', 5: '#2f6e52', null: '#d8d3c4' };
 const QUARTERS = ['q1', 'q2', 'q3', 'q4'];
 const Q_LABEL = { q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4', forecast: 'คาดการณ์' };
 
@@ -128,17 +128,30 @@ function kpiMatchesFilter(kpiId) {
   const lv = s.level === null ? null : Math.round(s.level);
   return filterState.levelSet.has(lv);
 }
+function toggleLevelGroupFilter(levels) {
+  const allOn = levels.every(lv => filterState.levelSet.has(lv));
+  levels.forEach(lv => { if (allOn) filterState.levelSet.delete(lv); else filterState.levelSet.add(lv); });
+  renderHome();
+}
+// Forecast score for one leaf KPI — same humanChosen rule already used by the
+// heat map's "forecast" row and quick-detail; centralized here for reuse.
+function forecastLeafScore(kpiId) {
+  const kpi = MOU_DATA.kpis[kpiId];
+  const fc = MOU_DATA.forecast[kpiId];
+  if (!fc) return { level: null, rawValue: null };
+  const humanChosen = ['qualitative', 'evidence', 'milestone_manual'].includes(kpi.scoringMethod);
+  return scoreLeafKPI(kpi, humanChosen ? fc.score : fc.result, 'forecast');
+}
 
 // ═══════════════════════════════════════════════════════════
 // HOME  (visual layer only — every number below still comes from
 // scoreAt/scoreParentAt/overallScoreAt/overallForecastScore/MOU_DATA,
 // same as before. Nothing here computes a score.)
 // ═══════════════════════════════════════════════════════════
-const CHILI_SVG = `<svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true">
-  <path d="M28 8 Q33 1 40 5" stroke="#3f7d4a" stroke-width="4" fill="none" stroke-linecap="round"/>
-  <path d="M22 9 C10 18 8 34 15 46 C21 56 34 58 42 50 C52 40 50 22 38 10 C34 15 30 15 26 11 C25 10 23 9 22 9 Z" fill="#c0392b"/>
-  <ellipse cx="24" cy="18" rx="4" ry="7" fill="#e2554f" opacity="0.55" transform="rotate(-25 24 18)"/>
-</svg>`;
+// Mascot: PAT-PHET pixel-chili brand asset (supplied artwork, not generated here).
+// Used in exactly 2 places on Home per design brief: hero summary + quarterly progress.
+const MASCOT_HERO_IMG = 'assets/mascot/chili-hero.png';
+const MASCOT_RUN_IMG = 'assets/mascot/chili-run.png';
 
 function heroNarrative(current, target) {
   if (current === null) return 'ยังไม่มีข้อมูลผลการดำเนินงาน';
@@ -166,18 +179,27 @@ function priorityKpis(q, limit = 5) {
     .slice(0, limit);
 }
 
-function topWeightKpi() {
-  return Object.values(MOU_DATA.kpis).filter(k => k.isLeaf).sort((a, b) => b.weight - a.weight)[0];
-}
-
-const issueGroupOpen = { urgent: false, deduction: false, assignment: false };
-function toggleIssueGroup(key) {
-  issueGroupOpen[key] = !issueGroupOpen[key];
-  renderIssues();
+function topWeightKpis(n) {
+  return Object.values(MOU_DATA.kpis).filter(k => k.isLeaf).sort((a, b) => b.weight - a.weight).slice(0, n);
 }
 
 function goToActionPlan() {
   document.getElementById('tabBtnAlerts').click();
+}
+function goToOverview() {
+  const btn = document.getElementById('tabBtnOverview');
+  if (btn) switchTab('overview', btn);
+}
+
+// Bottom row (สรุปผลการดำเนินงาน / ประเด็นที่ควรเร่งรัด) can be inspected for any
+// quarter via the quarter tabs — null means "follow the system's active quarter".
+let bottomQ = null;
+function setBottomQuarter(q) {
+  bottomQ = q;
+  const aq = bottomQ || systemActiveQuarter();
+  renderSummaryBox(aq, overallScoreAt(aq));
+  renderPriorityBox(aq);
+  document.querySelectorAll('.bottom-qtabs button').forEach(b => b.classList.toggle('active', b.dataset.q === aq));
 }
 
 function renderHome() {
@@ -186,8 +208,7 @@ function renderHome() {
   const activeQ = systemActiveQuarter();
   const current = overallScoreAt(activeQ);
   const forecast = overallForecastScore();
-  const top = topWeightKpi();
-  const topScore = scoreAt(top.id, activeQ);
+  const highlightKpis = topWeightKpis(4);
 
   root.innerHTML = `
     <div class="hm-filterbar" id="filterbar" style="display:${filterState.levelSet.size || filterState.quarter ? 'flex' : 'none'}">
@@ -198,57 +219,68 @@ function renderHome() {
     </div>
 
     <div class="home-grid">
-      <aside class="home-left">
-        <div class="mini-card legend-card">
+      <aside class="ledger-col">
+        <div class="home-panel">
           <div class="mini-title">ระดับคะแนน</div>
           ${[5, 4, 3, 2, 1].map(lv => `<div class="legend-row"><i style="background:${LV_COLORS[lv]}"></i>Level ${lv}</div>`).join('')}
           <div class="legend-row"><i style="background:${LV_COLORS.null}"></i>ยังไม่มีข้อมูล</div>
         </div>
-        <div class="mini-card highlight-card">
+        <div class="home-panel">
           <div class="mini-title">ผลตัวชี้วัดที่สำคัญ</div>
-          <div class="highlight-id">${top.id} · น้ำหนัก ${top.weight}</div>
-          <div class="highlight-label">${top.label}</div>
-          <div class="highlight-score" style="color:${lvColor(topScore.level)}">${topScore.level !== null ? topScore.level.toFixed(4) : '—'}<span class="score-of">/5</span></div>
-          <div class="highlight-target">Target: ${top.target ?? '—'}</div>
-        </div>
-        <div class="mascot-card">
-          <div class="mascot-icon">${CHILI_SVG}</div>
-          <div class="mascot-tag">PAT-PHET<br>มุ่งสู่เป้าหมาย</div>
+          ${highlightKpis.map(kpi => {
+            const s = scoreAt(kpi.id, activeQ);
+            const fc = forecastLeafScore(kpi.id);
+            const barPct = s.level !== null ? s.level / 5 * 100 : 0;
+            return `
+            <div class="hl-kpi" onclick="openQuickDetail('${kpi.id}','${activeQ}')" style="cursor:pointer">
+              <div class="hl-kpi-id">${kpi.id} · น้ำหนัก ${kpi.weight}</div>
+              <div class="hl-kpi-label">${kpi.label}</div>
+              <div class="hl-kpi-scores" style="color:${lvColor(s.level)}">${s.level !== null ? s.level.toFixed(4) : '—'}<span class="fc" style="color:${lvColor(fc.level)}">${fc.level !== null ? ' · คาดการณ์ ' + fc.level.toFixed(4) : ''}</span></div>
+              <div class="hl-kpi-bar"><div class="hl-kpi-bar-fill" style="width:${barPct}%;background:${lvColor(s.level)}"></div></div>
+              <div class="hl-kpi-meta"><span>Target: ${kpi.target ?? '—'} ${kpi.unit || ''}</span></div>
+            </div>`;
+          }).join('')}
+          <button class="hl-kpi-more" onclick="goToOverview()">ดูตัวชี้วัดทั้งหมด →</button>
         </div>
       </aside>
 
       <div class="home-center">
-        <div class="hero-row">
-          <div class="hero-mascot">${CHILI_SVG}</div>
-          <div class="hero-text">
-            <h1>ผลการดำเนินงาน ${PERIOD_LABEL[activeQ]}</h1>
-            <p>${heroNarrative(current, TARGET_SCORE)}</p>
+        <div>
+          <div class="hero-masthead">
+            <div class="hero-mascot"><img src="${MASCOT_HERO_IMG}" alt="PAT-PHET mascot"></div>
+            <div class="hero-text">
+              <h1>ผลการดำเนินงาน ${PERIOD_LABEL[activeQ]}</h1>
+              <p>${heroNarrative(current, TARGET_SCORE)}</p>
+            </div>
           </div>
-          <div class="hero-scores">
-            <div class="mini-score-card">
-              <div class="mini-score-label">คะแนนรวม ${PERIOD_LABEL[activeQ]}</div>
-              <div class="mini-score-val" style="color:${lvColor(current)}">${current !== null ? current.toFixed(4) : '—'}<span class="score-of">/5</span></div>
+          <div class="instrument-strip">
+            <div class="score-card">
+              <div class="score-card-label">คะแนนรอบ ${PERIOD_LABEL[activeQ]}</div>
+              <div class="score-card-val" style="color:${lvColor(current)}">${current !== null ? current.toFixed(4) : '—'}<span class="score-of">/5</span></div>
               <div class="score-bar"><div class="score-bar-fill" style="width:${current ? current / 5 * 100 : 0}%;background:${lvColor(current)}"></div></div>
+              <div class="score-card-sub">${current !== null ? (current / TARGET_SCORE * 100).toFixed(2) + '% เทียบกับเป้าหมาย' : ''}</div>
             </div>
-            <div class="mini-score-card">
-              <div class="mini-score-label">คะแนนคาดการณ์สิ้นปี</div>
-              <div class="mini-score-val" style="color:var(--gold)">${forecast !== null ? forecast.toFixed(4) : '—'}<span class="score-of">/5</span></div>
-              <div class="mini-score-sub">${forecast !== null ? (forecast / TARGET_SCORE * 100).toFixed(2) + '% เทียบเป้าหมาย' : ''}</div>
+            <div class="score-card">
+              <div class="score-card-label">คะแนนคาดการณ์สิ้นปี</div>
+              <div class="score-card-val" style="color:${lvColor(forecast)}">${forecast !== null ? forecast.toFixed(4) : '—'}<span class="score-of">/5</span></div>
+              <div class="score-bar"><div class="score-bar-fill" style="width:${forecast ? forecast / 5 * 100 : 0}%;background:${lvColor(forecast)}"></div></div>
+              <div class="score-card-sub">${forecast !== null ? (forecast / TARGET_SCORE * 100).toFixed(2) + '% เทียบกับเป้าหมาย' : ''}</div>
             </div>
-            <div class="mini-score-card">
-              <div class="mini-score-label">คะแนนเป้าหมายปี 2569</div>
-              <div class="mini-score-val" style="color:var(--brand)">${TARGET_SCORE.toFixed(4)}<span class="score-of">/5</span></div>
+            <div class="score-card">
+              <div class="score-card-label">คะแนนเป้าหมาย</div>
+              <div class="score-card-val" style="color:var(--home-green)">${TARGET_SCORE.toFixed(4)}<span class="score-of">/5</span></div>
+              <div class="score-bar"><div class="score-bar-fill" style="width:100%;background:var(--home-green)"></div></div>
             </div>
           </div>
         </div>
 
-        <div class="trail-card">
-          <div class="card-title">ความก้าวหน้ารายไตรมาส</div>
-          <div class="trail" id="trail"></div>
+        <div class="home-panel">
+          <div class="card-title">ความก้าวหน้า</div>
+          <div class="trail-chart" id="trail"></div>
         </div>
 
-        <div class="heatmap-card grow">
-          <div class="card-title">Heat Map (ระดับคะแนน)</div>
+        <div class="home-panel heatmap-panel grow">
+          <div class="card-title">Heat Map</div>
           <div id="heatmap"></div>
           <div class="hm-legend">
             ${[1, 2, 3, 4, 5].map(lv => `<span class="hm-legend-item" onclick="toggleLevelFilter(${lv})" style="cursor:pointer;${filterState.levelSet.has(lv) ? 'font-weight:700' : ''}"><i style="background:${LV_COLORS[lv]}"></i>Level ${lv}</span>`).join('')}
@@ -257,20 +289,25 @@ function renderHome() {
         </div>
 
         <div class="bottom-row">
-          <div class="mini-card summary-card">
-            <div class="mini-title">สรุปผลการดำเนินงาน</div>
+          <div class="home-panel">
+            <div class="bottom-head">
+              <div class="mini-title" style="margin-bottom:0">สรุปผลการดำเนินงาน</div>
+              <div class="bottom-qtabs">${QUARTERS.map(q => `<button data-q="${q}" class="${q === activeQ ? 'active' : ''}" onclick="setBottomQuarter('${q}')">${Q_LABEL[q]}</button>`).join('')}</div>
+            </div>
             <div id="summaryBox"></div>
           </div>
-          <div class="mini-card priority-card">
-            <div class="mini-title">ประเด็นที่ควรเร่งรัดเพื่อยกระดับคะแนน</div>
+          <div class="home-panel">
+            <div class="bottom-head">
+              <div class="mini-title" style="margin-bottom:0">ประเด็นที่ควรเร่งรัดเพื่อยกระดับคะแนน</div>
+            </div>
             <div id="priorityBox"></div>
             <button class="cta-btn" onclick="goToActionPlan()">ดูแผนการดำเนินการ →</button>
           </div>
         </div>
       </div>
 
-      <aside class="home-right">
-        <div class="mini-card issues-card">
+      <aside class="ledger-col">
+        <div class="home-panel">
           <div class="mini-title">ประเด็นที่ควรติดตาม</div>
           <div id="issues"></div>
         </div>
@@ -280,8 +317,8 @@ function renderHome() {
   renderTrail(activeQ);
   renderHeatmap();
   renderIssues();
-  renderSummaryBox(activeQ, current);
-  renderPriorityBox(activeQ);
+  renderSummaryBox(bottomQ || activeQ, overallScoreAt(bottomQ || activeQ));
+  renderPriorityBox(bottomQ || activeQ);
 }
 
 function renderSummaryBox(activeQ, current) {
@@ -294,7 +331,7 @@ function renderSummaryBox(activeQ, current) {
     ${delta !== null ? `<div class="summary-trend">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta).toFixed(4)} เทียบ ${Q_LABEL[prevQ]}</div>` : ''}
     <div class="summary-dist">
       ${[5, 4, 3, 2, 1].map(lv => `<div class="dist-chip" style="background:${LV_COLORS[lv]}22;color:${LV_COLORS[lv]}"><b>${dist[lv]}</b> Lv${lv}</div>`).join('')}
-      <div class="dist-chip" style="background:${LV_COLORS.null}55;color:#6b615a"><b>${dist.none}</b> ไม่มีข้อมูล</div>
+      <div class="dist-chip" style="background:${LV_COLORS.null}55;color:var(--home-text-2)"><b>${dist.none}</b> ไม่มีข้อมูล</div>
     </div>
   `;
 }
@@ -305,27 +342,94 @@ function renderPriorityBox(activeQ) {
   el.innerHTML = items.length
     ? items.map(({ kpi, s }) => `
         <div class="priority-item" onclick="openQuickDetail('${kpi.id}','${activeQ}')">
-          <span class="priority-lv" style="background:${lvColor(s.level)}">${s.level.toFixed(1)}</span>
+          <span class="priority-lv" style="background:${lvColor(s.level)}22;color:${lvColor(s.level)}">${s.level.toFixed(1)}</span>
           <span class="priority-label"><b>${kpi.id}</b> ${kpi.label}</span>
         </div>`).join('')
     : '<div class="empty-note">ไม่มี KPI ที่ต้องเร่งรัดในไตรมาสนี้</div>';
 }
 
+// 6 equal tick columns: Q1, Q2, Q3, Q4, เป้าหมาย, คาดการณ์ — matches RDE_MOU69
+// "Page 1_Home" mockup, where Target sits on the trajectory and Forecast is its
+// open, real (overallForecastScore) end-of-year endpoint.
+const TRAIL_QX = [8.333, 25, 41.667, 58.333, 75, 91.667];
 function renderTrail(activeQ) {
   const el = document.getElementById('trail');
-  const pts = ['q1', 'q2', 'q3', 'q4'].map(q => ({ q, score: overallScoreAt(q) }));
-  const fc = overallForecastScore();
-  el.innerHTML = pts.map(p => `
-    <div class="trail-pt ${p.q === activeQ ? 'active' : ''} ${p.score === null ? 'empty' : ''}" onclick="toggleQuarterFilter('${p.q}')">
-      <div class="trail-dot" style="background:${p.score !== null ? lvColor(p.score) : 'var(--border)'}"></div>
-      <div class="trail-val">${p.score !== null ? p.score.toFixed(4) : 'ยังไม่มีข้อมูล'}</div>
-      <div class="trail-label">${Q_LABEL[p.q]}</div>
+  const qPts = ['q1', 'q2', 'q3', 'q4'].map((q, i) => ({ q, score: overallScoreAt(q), x: TRAIL_QX[i] * 6 }));
+  const forecast = overallForecastScore();
+  const H = 120, padTop = 16, padBottom = 18, baseY = H - padBottom;
+  const yOf = v => padTop + (1 - Math.max(0, Math.min(5, v)) / 5) * (baseY - padTop);
+  const targetPt = { x: TRAIL_QX[4] * 6, y: yOf(TARGET_SCORE) };
+  const forecastPt = forecast !== null ? { x: TRAIL_QX[5] * 6, y: yOf(forecast) } : null;
+
+  // draw a smooth curve only across consecutive known actual points, starting from Q1
+  let segments = [];
+  let seg = [];
+  for (const p of qPts) {
+    if (p.score !== null) { seg.push(p); }
+    else { if (seg.length) segments.push(seg); seg = []; }
+  }
+  if (seg.length) segments.push(seg);
+
+  const smoothPath = s => s.reduce((d, p, i) => {
+    const y = yOf(p.score).toFixed(1);
+    if (i === 0) return `M ${p.x},${y}`;
+    const prev = s[i - 1], midX = ((prev.x + p.x) / 2).toFixed(1);
+    return `${d} C ${midX},${yOf(prev.score).toFixed(1)} ${midX},${y} ${p.x},${y}`;
+  }, '');
+
+  const lines = segments.filter(s => s.length > 1).map(smoothPath);
+  const areas = segments.filter(s => s.length > 1).map(s =>
+    `${smoothPath(s)} L ${s[s.length - 1].x},${baseY} L ${s[0].x},${baseY} Z`);
+
+  // dotted guide from the last known actual point, through Target, to Forecast —
+  // no line is drawn through Q3/Q4 while they're unreported (no data to plot there)
+  const lastKnown = [...qPts].reverse().find(p => p.score !== null);
+  let guideD = '';
+  if (lastKnown) {
+    guideD = `M ${lastKnown.x},${yOf(lastKnown.score).toFixed(1)} L ${targetPt.x},${targetPt.y.toFixed(1)}`;
+    if (forecastPt) guideD += ` L ${forecastPt.x},${forecastPt.y.toFixed(1)}`;
+  }
+
+  const dots = qPts.filter(p => p.score !== null).map(p => {
+    const r = p.q === activeQ ? 6.5 : 5;
+    return `<circle cx="${p.x}" cy="${yOf(p.score).toFixed(1)}" r="${r}" fill="${lvColor(p.score)}" stroke="var(--home-surface)" stroke-width="2.5"/>`;
+  }).join('');
+
+  const activePt = qPts.find(p => p.q === activeQ);
+
+  el.innerHTML = `
+    <div class="trail-plot">
+      <svg class="trail-svg" viewBox="0 0 600 ${H}" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="trailFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--home-brand-red)" stop-opacity="0.22"/>
+            <stop offset="100%" stop-color="var(--home-brand-red)" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        ${guideD ? `<path d="${guideD}" fill="none" stroke="var(--home-text-3)" stroke-width="1.5" stroke-dasharray="4 5"/>` : ''}
+        ${areas.map(d => `<path d="${d}" fill="url(#trailFill)"/>`).join('')}
+        ${lines.map(d => `<path d="${d}" fill="none" stroke="var(--home-brand-red)" stroke-width="3" stroke-linecap="round"/>`).join('')}
+        ${dots}
+        <circle cx="${targetPt.x}" cy="${targetPt.y.toFixed(1)}" r="6.5" fill="var(--home-amber)" stroke="var(--home-surface)" stroke-width="2.5"/>
+        ${forecastPt ? `<circle cx="${forecastPt.x}" cy="${forecastPt.y.toFixed(1)}" r="6" fill="var(--home-surface)" stroke="${lvColor(forecast)}" stroke-width="2.5"/>` : ''}
+      </svg>
+      ${activePt && activePt.score !== null ? `<div class="trail-mascot" style="left:${activePt.x / 6}%;top:${yOf(activePt.score) / H * 100}%"><img src="${MASCOT_RUN_IMG}" alt="ตำแหน่งปัจจุบัน"></div>` : ''}
     </div>
-  `).join('') + `
-    <div class="trail-pt target">
-      <div class="trail-dot" style="background:var(--gold)"></div>
-      <div class="trail-val">${TARGET_SCORE.toFixed(4)}</div>
-      <div class="trail-label">เป้าหมาย</div>
+    <div class="trail-ticks">
+      ${qPts.map(p => `
+        <div class="trail-tick" onclick="toggleQuarterFilter('${p.q}')" style="cursor:pointer;${p.q === activeQ ? 'font-weight:700' : ''}">
+          <div class="trail-tick-val ${p.score === null ? 'empty' : ''}">${p.score !== null ? p.score.toFixed(4) : 'ยังไม่มีข้อมูล'}</div>
+          <div class="trail-tick-label">${Q_LABEL[p.q]}</div>
+        </div>
+      `).join('')}
+      <div class="trail-tick">
+        <div class="trail-tick-val" style="color:var(--home-amber)">${TARGET_SCORE.toFixed(4)}</div>
+        <div class="trail-tick-label">เป้าหมาย</div>
+      </div>
+      <div class="trail-tick">
+        <div class="trail-tick-val ${forecast === null ? 'empty' : ''}" style="${forecast !== null ? `color:${lvColor(forecast)}` : ''}">${forecast !== null ? forecast.toFixed(4) : 'ยังไม่มีข้อมูล'}</div>
+        <div class="trail-tick-label">คาดการณ์</div>
+      </div>
     </div>
   `;
 }
@@ -344,9 +448,46 @@ const HM_GROUPS = [
 ];
 const HM_ROWS = ['forecast', 'q4', 'q3', 'q2', 'q1'];
 
+// Column-group bands (ยุทธศาสตร์/การเงิน/... per RDE_MOU69 mockup), derived from each
+// group's own real kpi.groupLabel — never hardcoded, so it always matches MOU_DATA.
+function hmCategoryBands() {
+  const bands = [];
+  for (const g of HM_GROUPS) {
+    const label = MOU_DATA.kpis[g.children[0]].groupLabel || '';
+    const span = g.children.length;
+    if (bands.length && bands[bands.length - 1].label === label) bands[bands.length - 1].span += span;
+    else bands.push({ label, span });
+  }
+  return bands;
+}
+
+// Four filter pills = the same Level 1-5 legend, grouped into the mockup's
+// "เสี่ยง / ต่ำกว่าเป้าหมาย / เป็นไปตามเป้าหมาย / สูงกว่าเป้าหมาย" bands.
+const HM_PILL_GROUPS = [
+  { levels: [1], label: 'เสี่ยง', color: 'var(--home-brand-red)' },
+  { levels: [2, 3], label: 'ต่ำกว่าเป้าหมาย', color: 'var(--home-coral)' },
+  { levels: [4], label: 'เป็นไปตามเป้าหมาย', color: 'var(--home-green)' },
+  { levels: [5], label: 'สูงกว่าเป้าหมาย', color: '#2c8059' },
+];
+
 function renderHeatmap() {
   const el = document.getElementById('heatmap');
-  let html = '<div class="hm-grid">';
+  const activeQ = systemActiveQuarter();
+  const dist = levelDistribution(activeQ);
+
+  let html = '<div class="hm-pills">';
+  for (const g of HM_PILL_GROUPS) {
+    const count = g.levels.reduce((s, lv) => s + dist[lv], 0);
+    const on = g.levels.every(lv => filterState.levelSet.has(lv));
+    html += `<button class="hm-pill ${on ? 'on' : ''}" style="background:${g.color}" onclick="toggleLevelGroupFilter([${g.levels}])">${g.label} <b>${count}</b></button>`;
+  }
+  html += '</div>';
+
+  html += '<div class="hm-grid">';
+  html += '<div class="hm-corner"></div>';
+  for (const b of hmCategoryBands()) {
+    html += `<div class="hm-cathead" style="grid-column:span ${b.span}">${b.label}</div>`;
+  }
   html += '<div class="hm-corner"></div>';
   for (const g of HM_GROUPS) {
     html += `<div class="hm-colhead" style="grid-column:span ${g.children.length}">${g.label}</div>`;
@@ -420,26 +561,31 @@ function renderIssues() {
   const el = document.getElementById('issues');
   const activeQ = systemActiveQuarter();
   const urgent = priorityKpis(activeQ, 99); // same "ต้องเร่ง" definition as the bottom priority box
+  const MAX_SHOWN = 5;
 
-  function group(key, title, count, detailHtml) {
-    const open = issueGroupOpen[key];
+  // always-visible colored watch-cards, per RDE_MOU69 mockup's "ประเด็นที่ควรติดตาม"
+  function card(color, title, count, items, emptyText) {
+    const shown = items.slice(0, MAX_SHOWN).join('');
+    const more = items.length > MAX_SHOWN ? `<div class="issue-status" style="margin-top:6px">และอีก ${items.length - MAX_SHOWN} รายการ</div>` : '';
     return `
-      <div class="issue-group">
-        <div class="issue-group-head" onclick="toggleIssueGroup('${key}')">
-          <span>${title}</span>
-          <span class="issue-count">${count}</span>
+      <div class="watch-card">
+        <div class="watch-card-head" style="background:${color}">
+          <span>${title}</span><b>${count}</b>
         </div>
-        ${open ? `<div class="issue-group-body">${detailHtml || '<div class="empty-note">ไม่มีรายการ</div>'}</div>` : ''}
+        <div class="watch-card-body">${items.length ? shown + more : `<div class="empty-note">${emptyText}</div>`}</div>
       </div>`;
   }
 
   const html =
-    group('urgent', 'KPI ต้องเร่ง', urgent.length,
-      urgent.map(({ kpi, s }) => `<div class="issue-item" onclick="openQuickDetail('${kpi.id}','${activeQ}')"><b>${kpi.id}</b> — ${kpi.label}<div class="issue-status">คะแนน ${s.level.toFixed(2)}</div></div>`).join('')) +
-    group('deduction', 'เงื่อนไขหักคะแนน', MOU_DATA.deductions.length,
-      MOU_DATA.deductions.map(d => `<div class="issue-item"><b>${d.kpi}</b> — ${d.reason}<div class="issue-status">${d.status}</div></div>`).join('')) +
-    group('assignment', 'ประเด็นมอบหมายจากที่ประชุม', MOU_DATA.assignments.length,
-      MOU_DATA.assignments.map(a => `<div class="issue-item"><b>${a.kpi}</b> — ${a.note}</div>`).join(''));
+    card('var(--home-brand-red)', 'KPI ต้องเร่ง', urgent.length,
+      urgent.map(({ kpi, s }) => `<div class="issue-item" onclick="openQuickDetail('${kpi.id}','${activeQ}')"><b>${kpi.id}</b> — ${kpi.label}<div class="issue-status">คะแนน ${s.level.toFixed(2)}</div></div>`),
+      'ไม่มี KPI ที่ต้องเร่งรัดในไตรมาสนี้') +
+    card('var(--home-coral)', 'เงื่อนไขหักคะแนน', MOU_DATA.deductions.length,
+      MOU_DATA.deductions.map(d => `<div class="issue-item"><b>${d.kpi}</b> — ${d.reason}<div class="issue-status">${d.status}</div></div>`),
+      'ไม่มีรายการ') +
+    card('var(--home-amber)', 'ประเด็นมอบหมายจากที่ประชุม', MOU_DATA.assignments.length,
+      MOU_DATA.assignments.map(a => `<div class="issue-item"><b>${a.kpi}</b> — ${a.note}</div>`),
+      'ไม่มีรายการ');
 
   el.innerHTML = html;
 }

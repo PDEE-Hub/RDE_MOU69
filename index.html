@@ -4,105 +4,178 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PAT-PHET | MOU 69 Dashboard — UAT Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#f8f5ee; --card:#ffffff; --border:#e8e2d5; --text:#241c18; --text2:#6b615a; --text3:#a49a90;
-    --brand:#c0392b; --brand-dark:#8f241d; --gold:#b8862f;
-    --lv1:#e2554f; --lv2:#ef9483; --lv3:#e3a82e; --lv4:#5bc69a; --lv5:#1f9d6f; --lv-none:#dcdad3;
-    --radius:8px; --shadow:0 1px 3px rgba(36,28,24,0.06);
+    /* ── PAT-PHET Bold Product: soft neutral canvas + confident chili-red hero blocks, big radius, no hairlines ── */
+    --pagebg:#f4f2ee; --surface:#ffffff; --surface-2:#f8f6f2;
+    --ink:#241f1c; --ink-soft:#75695f; --ink-faint:#a99e93;
+    --rule:#eae5dc;
+    --chili:#e6432f; --chili-dark:#c22f1e; --on-chili:#ffffff;
+    --amber:#e0982c;
+    --level-1:#e6432f; --level-2:#ef8f76; --level-3:#e0982c; --level-4:#75b592; --level-5:#2f9163; --no-data:#e4e0d8;
+    --font-display:'Bai Jamjuree','Sarabun',sans-serif;
+
+    /* legacy aliases kept so every existing component/page picks up the palette */
+    --bg:var(--pagebg); --card:var(--surface); --border:var(--rule);
+    --text:var(--ink); --text2:var(--ink-soft); --text3:var(--ink-faint);
+    --brand:var(--chili); --brand-dark:var(--chili-dark); --gold:var(--amber);
+    --structural:var(--ink); --structural-soft:var(--ink-soft);
+    --lv1:var(--level-1); --lv2:var(--level-2); --lv3:var(--level-3); --lv4:var(--level-4); --lv5:var(--level-5); --lv-none:var(--no-data);
+    --radius:14px; --radius-lg:26px; --shadow:0 2px 6px rgba(36,31,28,0.04),0 16px 32px rgba(36,31,28,0.07); --shadow-sm:0 2px 8px rgba(36,31,28,0.05);
+    /* nav — per RDE Mockup: blue is structural/navigation, red stays reserved for the brand mark + data */
+    --nav-active:#4f7cab; --nav-inactive-bg:#e7edf4; --nav-inactive-text:#5b7089;
   }
   *{box-sizing:border-box}
-  body{font-family:'Sarabun','IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--text);margin:0;font-size:14px}
-  header{background:var(--card);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10}
-  .logo{display:flex;align-items:center;gap:8px;font-weight:800;color:var(--brand);font-size:18px}
-  .logo .badge{background:var(--brand);color:#fff;border-radius:6px;padding:2px 8px;font-size:12px}
-  .tabs{display:flex;gap:4px;margin-left:24px}
-  .tab-btn{border:none;background:transparent;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:14px;color:var(--text2);font-family:inherit}
-  .tab-btn.active{background:var(--brand);color:#fff;font-weight:600}
+  body{font-family:'Sarabun','IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--text);margin:0;font-size:14px;font-variant-numeric:tabular-nums}
+  header{background:var(--pagebg);border-bottom:none;box-shadow:none;padding:18px 28px 10px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10}
+  .logo{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:700;color:var(--ink);font-size:17px}
+  .logo .badge{background:var(--brand);color:#fff;border-radius:8px;padding:4px 10px;font-family:var(--font-display);font-weight:600;font-size:12px;letter-spacing:.03em}
+  .tabs{display:flex;gap:8px;margin-left:22px}
+  .tab-btn{position:relative;border:none;background:var(--nav-inactive-bg);color:var(--nav-inactive-text);padding:10px 20px;border-radius:10px;cursor:pointer;font-size:13.5px;font-family:inherit;font-weight:600;transition:background 0.15s,color 0.15s}
+  .tab-btn:hover{background:#dbe5ef}
+  .tab-btn.active{background:var(--nav-active);color:#fff;font-weight:700}
   .asof{margin-left:auto;color:var(--text3);font-size:12px}
   .uat-banner{background:#fff8e1;border-bottom:1px solid #e8d488;color:#8a6d1a;font-size:11px;text-align:center;padding:4px 12px;line-height:1.5}
-  main{max-width:1720px;margin:0 auto;padding:16px 20px}
+  main{max-width:1720px;margin:0 auto;padding:24px 28px 56px}
   .page{display:none}
   .page.active{display:block}
-  .card-title{font-weight:700;font-size:14px;margin-bottom:10px;color:var(--text)}
+  .card-title{font-family:var(--font-display);font-weight:700;font-size:15px;margin-bottom:14px;color:var(--ink)}
 
   .score-of{font-size:13px;color:var(--text3);font-weight:400}
-  .score-bar{height:5px;background:var(--border);border-radius:3px;margin-top:6px;overflow:hidden}
-  .score-bar-fill{height:100%;border-radius:3px}
 
-  /* ── 3-column balanced layout, per Mockup ── */
-  .home-grid{display:grid;grid-template-columns:200px 1fr 270px;gap:14px;align-items:start}
-  .home-left,.home-center,.home-right{display:flex;flex-direction:column;gap:12px;min-width:0}
+  /* ══════════════ HOME-ONLY skin patch (scoped; geometry untouched) ══════════════
+     Home's layout/spacing/sizing is approved and locked. Only surface/border/text/
+     shadow/accent COLORS are overridden here, via tokens scoped to #page-home so
+     Overview/Detail/Entry/Alerts (which share many of the same class names and the
+     global :root tokens) are completely unaffected. */
+  #page-home{
+    /* soft, muted reading of the approved RDE_MOU69 "Page 1_Home" mockup:
+       same layout/content the mockup shows, but soft white surfaces + shadow
+       instead of hard black borders, and a muted palette instead of flat
+       saturated mockup colors. */
+    --home-bg:#f5f6f9; --home-surface:#ffffff; --home-surface-soft:#f8f9fb;
+    --home-text:#2b3455; --home-text-2:#69728c; --home-text-3:#9aa1b5;
+    --home-border:#e7eaf2; --home-border-soft:#eef0f6;
+    --home-navy:#33436b;
+    --home-brand-red:#d6483a; --home-brand-red-dark:#b83b2f; --home-brand-red-soft:#f7e3e0;
+    --home-coral:#e2836f; --home-coral-soft:#fbeae5;
+    --home-amber:#d3a13e; --home-amber-soft:#f6ecd7;
+    --home-green:#3fa172; --home-green-soft:#e2f3ea;
+    --home-blue:#5b84b1; --home-blue-soft:#e8eff6;
+    --home-shadow:0 2px 6px rgba(43,52,85,0.05),0 16px 32px rgba(43,52,85,0.06);
+    --home-shadow-sm:0 2px 8px rgba(43,52,85,0.05);
+    background:var(--home-bg);
+  }
+  #page-home .card-title{color:var(--home-navy)}
+  #page-home .mini-title{color:var(--home-navy)}
+  #page-home .score-of{color:var(--home-text-3)}
+  #page-home .score-bar{background:var(--home-border)}
+  .score-bar{height:4px;background:var(--rule);border-radius:2px;margin-top:8px;overflow:hidden}
+  .score-bar-fill{height:100%;border-radius:2px}
 
-  .mini-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
-  .mini-title{font-weight:700;font-size:12px;margin-bottom:8px;color:var(--text)}
+  /* ── Home layout, per RDE_MOU69 "Page 1_Home" mockup ── */
+  .home-grid{display:grid;grid-template-columns:250px 1fr 300px;gap:20px;align-items:start}
+  .home-center{display:flex;flex-direction:column;gap:20px;min-width:0}
+  .ledger-col{display:flex;flex-direction:column;gap:20px;min-width:0}
+  .home-panel{background:var(--home-surface);border:none;border-radius:var(--radius-lg);box-shadow:var(--home-shadow);padding:22px 24px}
+  .mini-title{font-family:var(--font-display);font-weight:700;font-size:13px;margin-bottom:12px;color:var(--ink)}
 
-  .legend-row{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;color:var(--text2)}
-  .legend-row i{width:10px;height:10px;border-radius:3px;display:inline-block;flex:0 0 auto}
+  .legend-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0;color:var(--home-text-2)}
+  .legend-row i{width:10px;height:10px;border-radius:50%;display:inline-block;flex:0 0 auto}
 
-  .highlight-id{font-size:10.5px;color:var(--text3)}
-  .highlight-label{font-size:12px;font-weight:600;margin:2px 0 8px;line-height:1.35;color:var(--text)}
-  .highlight-score{font-size:22px;font-weight:800}
-  .highlight-target{font-size:11px;color:var(--text2);margin-top:2px}
+  /* Left sidebar — key indicators list, each with its own progress bar */
+  .hl-kpi{padding:11px 0;border-top:1px solid var(--home-border)}
+  .hl-kpi:first-child{border-top:none;padding-top:0}
+  .hl-kpi-id{font-size:10.5px;color:var(--home-text-3)}
+  .hl-kpi-label{font-size:12px;font-weight:600;margin:2px 0 6px;line-height:1.35;color:var(--home-text)}
+  .hl-kpi-scores{font-size:13px;font-weight:700;margin-bottom:5px}
+  .hl-kpi-scores .fc{font-size:11px;font-weight:600;margin-left:6px;opacity:.8}
+  .hl-kpi-bar{height:6px;border-radius:3px;background:var(--home-border);overflow:hidden;margin-bottom:5px}
+  .hl-kpi-bar-fill{height:100%;border-radius:3px}
+  .hl-kpi-meta{display:flex;justify-content:space-between;font-size:10px;color:var(--home-text-3)}
+  .hl-kpi-more{display:block;text-align:center;margin-top:12px;font-size:12px;font-weight:700;color:var(--home-blue);cursor:pointer;background:none;border:none;font-family:inherit;width:100%;padding:6px 0}
+  .hl-kpi-more:hover{text-decoration:underline}
 
-  .mascot-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:var(--shadow)}
-  .mascot-icon{width:52px;height:52px}
-  .mascot-tag{font-size:11px;color:var(--brand);font-weight:700;text-align:center;line-height:1.35}
-
-  .hero-row{display:flex;align-items:center;gap:16px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;box-shadow:var(--shadow)}
-  .hero-mascot{width:40px;height:40px;flex:0 0 auto}
+  /* Masthead */
+  .hero-masthead{display:flex;align-items:center;gap:18px;padding:4px 4px 18px}
+  .hero-mascot{width:66px;height:66px;flex:0 0 auto;background:var(--home-surface-soft);border-radius:22px;display:flex;align-items:center;justify-content:center;box-shadow:var(--home-shadow-sm)}
+  .hero-mascot img{width:78%;height:78%;object-fit:contain}
   .hero-text{flex:1;min-width:0}
-  .hero-text h1{font-size:16px;margin:0 0 3px;font-weight:800;color:var(--text)}
-  .hero-text p{font-size:11.5px;color:var(--text2);margin:0}
-  .hero-scores{display:flex;gap:10px;flex:0 0 auto}
-  .mini-score-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 12px;min-width:135px}
-  .mini-score-label{font-size:10px;color:var(--text2);margin-bottom:2px;white-space:nowrap}
-  .mini-score-val{font-size:19px;font-weight:800}
-  .mini-score-sub{font-size:10px;color:var(--text2);margin-top:2px}
+  .hero-text h1{font-family:var(--font-display);font-size:21px;margin:0 0 5px;font-weight:700;color:var(--home-brand-red)}
+  .hero-text p{font-size:12.5px;color:var(--home-text-2);margin:0;max-width:62ch;line-height:1.55}
 
-  .trail-card,.heatmap-card,.issues-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
-  .trail{display:flex;justify-content:space-between;align-items:center;padding:8px 0;position:relative}
-  .trail::before{content:'';position:absolute;left:5%;right:5%;top:14px;border-top:2px dashed var(--border);z-index:0}
-  .trail-pt{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;flex:1;position:relative;z-index:1}
-  .trail-pt.empty{opacity:0.45;cursor:default}
-  .trail-pt.target{opacity:0.9}
-  .trail-dot{width:13px;height:13px;border-radius:50%;border:2px solid var(--card)}
-  .trail-pt.active .trail-dot{width:18px;height:18px;outline:3px solid var(--brand);outline-offset:2px}
-  .trail-val{font-weight:700;font-size:12.5px}
-  .trail-label{font-size:10.5px;color:var(--text3)}
+  /* Score strip — 3 equal soft cards, per mockup */
+  .instrument-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .score-card{background:var(--home-surface);border-radius:var(--radius-lg);box-shadow:var(--home-shadow);padding:20px 22px;text-align:center}
+  .score-card-label{font-size:12px;color:var(--home-text-2);margin-bottom:10px;font-weight:600}
+  .score-card-val{font-family:var(--font-display);font-size:30px;font-weight:700;line-height:1}
+  .score-card .score-bar{margin-top:12px;height:6px}
+  .score-card-sub{font-size:11px;color:var(--home-text-2);margin-top:8px}
 
-  .heatmap-card.grow{flex:1;display:flex;flex-direction:column}
-  .hm-grid{display:grid;gap:3px;align-items:center}
-  .hm-colhead{font-size:10.5px;text-align:center;color:var(--text2);font-weight:600}
-  .hm-rowhead{font-size:11.5px;color:var(--text2);cursor:pointer;padding-right:6px}
-  .hm-rowhead.active{color:var(--brand);font-weight:700}
-  .hm-cell{width:100%;height:26px;border-radius:4px;cursor:pointer}
+  /* Progress — smooth curve, Target sits on the trajectory, Forecast as the open endpoint */
+  .trail-chart{margin-top:2px}
+  .trail-plot{position:relative;height:120px}
+  .trail-svg{width:100%;height:100%;display:block}
+  .trail-ticks{display:flex;margin-top:8px}
+  .trail-tick{flex:1;text-align:center}
+  .trail-tick-val{font-weight:700;font-size:13px;color:var(--home-text)}
+  .trail-tick-val.empty{color:var(--home-text-3);font-weight:400;font-size:11px}
+  .trail-tick-label{font-size:10.5px;color:var(--home-text-3);margin-top:2px}
+  .trail-mascot{width:34px;height:34px;position:absolute;transform:translate(-50%,-100%);margin-top:-8px}
+  .trail-mascot img{width:100%;height:100%;object-fit:contain}
+
+  /* Heat map — filter pills + category bands, per mockup */
+  .home-panel.heatmap-panel{display:flex;flex-direction:column}
+  .hm-pills{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  .hm-pill{display:flex;align-items:center;gap:8px;border:none;border-radius:8px;padding:7px 8px 7px 14px;font-size:12px;font-weight:700;color:#fff;cursor:pointer;font-family:inherit;opacity:.55;transition:opacity .12s}
+  .hm-pill.on{opacity:1}
+  .hm-pill b{background:rgba(255,255,255,.32);border-radius:5px;padding:1px 9px}
+  .hm-cathead{font-size:11px;text-align:center;color:var(--home-text-2);font-weight:700;padding-bottom:6px;border-bottom:1px solid var(--home-border);margin-bottom:6px}
+  .hm-grid{display:grid;gap:6px;align-items:center}
+  .hm-colhead{font-size:10.5px;text-align:center;color:var(--home-text-2);font-weight:700}
+  .hm-rowhead{font-size:11.5px;color:var(--home-text-2);cursor:pointer;padding-right:6px}
+  .hm-rowhead.active{color:var(--home-blue);font-weight:700}
+  .hm-cell{width:100%;height:22px;border-radius:50%;cursor:pointer;opacity:0.92;transition:opacity .12s,transform .12s}
+  .hm-cell:hover{opacity:1;transform:scale(1.15)}
   .hm-cell.dim{opacity:0.15}
-  .hm-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
-  .hm-legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)}
-  .hm-legend-item i{width:10px;height:10px;border-radius:2px;display:inline-block}
+  .hm-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:16px}
+  .hm-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--home-text-2)}
+  .hm-legend-item i{width:9px;height:9px;border-radius:50%;display:inline-block}
 
-  .bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .summary-trend{font-size:12.5px;font-weight:700;margin-bottom:8px;color:var(--text)}
+  .bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .bottom-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .bottom-qtabs{display:flex;gap:4px}
+  .bottom-qtabs button{border:none;background:var(--home-surface-soft);color:var(--home-text-2);border-radius:6px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit}
+  .bottom-qtabs button.active{background:var(--home-blue);color:#fff}
+  .summary-trend{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--home-text)}
   .summary-dist{display:flex;flex-wrap:wrap;gap:6px}
-  .dist-chip{border-radius:8px;padding:4px 8px;font-size:11px}
-  .priority-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer}
-  .priority-item:last-child{border-bottom:none}
-  .priority-lv{color:#fff;border-radius:6px;padding:1px 6px;font-weight:700;font-size:11px;flex:0 0 auto}
-  .cta-btn{margin-top:10px;width:100%;background:var(--brand);color:#fff;border:none;border-radius:8px;padding:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12.5px}
+  .dist-chip{border-radius:999px;padding:5px 11px;font-size:11px;font-weight:600}
+  .priority-item{display:flex;align-items:center;gap:9px;padding:8px 0;border-top:1px solid var(--home-border);font-size:12.5px;cursor:pointer}
+  .priority-item:first-child{border-top:none}
+  .priority-lv{border-radius:999px;padding:2px 9px;font-weight:700;font-size:11px;flex:0 0 auto}
+  .cta-btn{margin-top:14px;background:var(--home-brand-red);color:#fff;border:none;border-radius:999px;padding:10px 18px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12.5px;transition:background .12s}
+  .cta-btn:hover{background:var(--home-brand-red-dark)}
 
-  .issue-group{border-bottom:1px solid var(--border)}
-  .issue-group:last-child{border-bottom:none}
-  .issue-group-head{display:flex;justify-content:space-between;align-items:center;padding:9px 2px;cursor:pointer;font-size:12.5px;font-weight:700;color:var(--text)}
-  .issue-count{background:var(--brand);color:#fff;border-radius:10px;padding:1px 8px;font-size:11px;min-width:20px;text-align:center}
-  .issue-group-body{padding-bottom:8px}
-  .issue-item{font-size:11.5px;padding:6px 2px;border-top:1px solid var(--border);line-height:1.5;cursor:pointer}
-  .issue-status{color:var(--text3);font-size:10.5px;margin-top:2px}
+  /* Right — "ประเด็นที่ควรติดตาม" as soft colored watch-cards, per mockup */
+  .watch-card{border-radius:12px;overflow:hidden;margin-bottom:12px}
+  .watch-card:last-child{margin-bottom:0}
+  .watch-card-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;font-weight:700;font-size:12.5px;color:#fff;cursor:pointer}
+  .watch-card-head b{background:rgba(255,255,255,.3);border-radius:5px;padding:1px 8px;font-size:11px}
+  .watch-card-body{background:var(--home-surface-soft);padding:10px 13px 12px;font-size:11.5px;color:var(--home-text-2);line-height:1.6}
+  .issue-item{font-size:11.5px;padding:6px 0;border-top:1px dashed var(--home-border);line-height:1.5;cursor:pointer;color:var(--home-text)}
+  .issue-item:first-child{border-top:none;padding-top:0}
+  .issue-status{color:var(--home-text-3);font-size:10.5px;margin-top:2px}
   .empty-note{color:var(--text3);font-size:12px;padding:8px 2px}
 
   .hm-filterbar{display:flex;align-items:center;gap:8px;background:#fff4e8;border:1px solid #e8c99a;border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px}
+  #page-home .hm-filterbar{background:var(--home-blue-soft);border-color:var(--home-border);color:var(--home-text)}
   .chip{background:var(--brand);color:#fff;border-radius:12px;padding:2px 10px;font-size:11px;border:1px solid transparent}
+  #page-home .chip{background:var(--home-blue)}
   .clear-btn{margin-left:auto;border:1px solid var(--border);background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-family:inherit}
+  #page-home .clear-btn{border-color:var(--home-border);background:var(--home-surface);color:var(--home-text-2)}
 
   .table-wrap{overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
   .ov-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:900px}
@@ -469,7 +542,7 @@
   <div class="logo"><span class="badge">PAT-PHET</span> MOU 69</div>
   <nav class="tabs">
     <button class="tab-btn active" onclick="switchTab('home',this)">Home</button>
-    <button class="tab-btn" onclick="switchTab('overview',this)">ภาพรวม</button>
+    <button class="tab-btn" id="tabBtnOverview" onclick="switchTab('overview',this)">ภาพรวม</button>
     <button class="tab-btn" id="tabBtnDetail" onclick="switchTab('detail',this)">รายละเอียดตัวชี้วัด</button>
     <button class="tab-btn" id="tabBtnEntry" onclick="switchTab('entry',this)">กรอกข้อมูล</button>
     <button class="tab-btn" id="tabBtnAlerts" onclick="switchTab('alerts',this)">แจ้งเตือน</button>
