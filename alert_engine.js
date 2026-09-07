@@ -30,17 +30,8 @@ function alertDeductionFor(kpiId) {
 
 // ── Obstacle / Solution (brief §12) — context only, never a severity trigger by itself ──
 function alertObstacleSolution(kpiId, kpi) {
-  if (alertIsPlanKpi(kpi)) {
-    const entry = getEntry(kpiId);
-    let latest = null;
-    ENTRY_Q3_MONTHS.forEach(m => {
-      const mm = entry.monthly && entry.monthly[m.key];
-      if (mm && (mm.submission_status === 'confirmed' || mm.submission_status === 'pending_confirmation')) latest = mm;
-    });
-    return { obstacle: latest ? latest.obstacle_text || null : null, solution: latest ? latest.solution_text || null : null };
-  }
-  const issue = getIssue(kpiId, 'q3');
-  return { obstacle: issue.obstacle_text || null, solution: issue.solution_text || null };
+  const record=publishedQuarterReport(kpiId,'q3');
+  return {obstacle:record?.issue?.obstacle_text||null,solution:record?.issue?.solution_text||null};
 }
 
 // ── NUMERIC analysis (brief §6/§7/§8) ──
@@ -48,6 +39,7 @@ function alertAnalyzeNumeric(kpiId, kpi) {
   const s = scoreAt(kpiId, 'q3');
   if (s.rawValue === null || s.rawValue === undefined) return null; // no confirmed Q3 — never fabricate
   const actual = s.rawValue;
+  if (typeof actual !== 'number' || !Number.isFinite(actual)) return null;
   const target = typeof kpi.target === 'number' ? kpi.target : null;
   const fc = MOU_DATA.forecast[kpiId];
   const forecastResult = (fc && typeof fc.result === 'number') ? fc.result : null;

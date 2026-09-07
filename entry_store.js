@@ -70,6 +70,7 @@ function setIssue(kpiId, monthKey, patch) {
 // ═══════════════════════════════════════════════════════════
 function entryDefaultFor(kpiId) {
   const type = ENTRY_KPI_TYPE[kpiId];
+  if (type === 'report') return {type,status:'not_started',draftReport:{values:{},summary_text:'',evidence:'',level:null}};
   if (type === 'numeric') {
     return { type, status: 'not_started', unit: (ENTRY_UNIT_OPTIONS[kpiId] || [{ key: 'default' }])[0].key, monthly: { m7: null, m8: null, m9: null }, confirmedAt: null, confirmedBy: null };
   }
@@ -135,7 +136,7 @@ function validateNumeric(kpiId) {
   ENTRY_Q3_MONTHS.forEach(m => {
     const v = entry.monthly[m.key];
     if (v === null || v === undefined) issues.push(`ยังไม่ได้กรอกผลเดือน ${m.label}`);
-    else if (v < 0) issues.push(`ผลเดือน ${m.label} ต้องไม่ติดลบ`);
+    else if (!Number.isFinite(v) || v < 0) issues.push(`ผลเดือน ${m.label} ต้องเป็นตัวเลขที่ไม่ติดลบ`);
   });
   return { ok: issues.length === 0, issues, result };
 }
@@ -144,7 +145,15 @@ function confirmNumeric(kpiId, confirmedBy) {
   if (!v.ok) return { ok: false, issues: v.issues };
   const overrideValue = v.result.cumulative; // linear scoringMethod: raw cumulative value, engine interpolates it
   ovrSet(kpiId, 'q3', overrideValue);
-  setEntry(kpiId, { status: 'confirmed', confirmedAt: new Date().toISOString(), confirmedBy: confirmedBy || 'ผู้รับผิดชอบ KPI' });
+  const entry = getEntry(kpiId);
+  const publishedReport = {
+    quarterlyResult: overrideValue,
+    monthly: Object.assign({}, entry.monthly),
+    summary_text: entry.summary_text || '',
+    issue: Object.assign({}, getIssue(kpiId, 'q3')),
+    confirmedAt: new Date().toISOString(),
+  };
+  setEntry(kpiId, { status: 'confirmed', confirmedAt: publishedReport.confirmedAt, confirmedBy: confirmedBy || 'ผู้รับผิดชอบ KPI', publishedReport });
   return { ok: true, value: overrideValue };
 }
 
@@ -269,9 +278,9 @@ function validateInvestment() {
   ENTRY_Q3_MONTHS.forEach(m => {
     const row = raw[m.key];
     if (row.plan === null || row.plan === undefined) issues.push(`ยังไม่ได้กรอกแผนเบิกจ่ายเดือน ${m.label}`);
-    else if (row.plan < 0) issues.push(`แผนเบิกจ่ายเดือน ${m.label} ต้องไม่ติดลบ`);
+    else if (!Number.isFinite(row.plan) || row.plan < 0) issues.push(`แผนเบิกจ่ายเดือน ${m.label} ต้องไม่ติดลบ`);
     if (row.actual === null || row.actual === undefined) issues.push(`ยังไม่ได้กรอกเบิกจ่ายจริงเดือน ${m.label}`);
-    else if (row.actual < 0) issues.push(`เบิกจ่ายจริงเดือน ${m.label} ต้องไม่ติดลบ`);
+    else if (!Number.isFinite(row.actual) || row.actual < 0) issues.push(`เบิกจ่ายจริงเดือน ${m.label} ต้องไม่ติดลบ`);
   });
   const result = computeInvestmentResult();
   if (result.allFilled && result.q3PlanTotal === 0) issues.push('แผนเบิกจ่ายรวม Q3 เป็น 0 — ไม่สามารถคำนวณ 1.1.2 ได้ กรุณาตรวจสอบ');
@@ -282,7 +291,9 @@ function confirmInvestment(confirmedBy) {
   if (!v.ok) return { ok: false, issues: v.issues };
   ovrSet('1.1.1', 'q3', v.result.pct111);
   ovrSet('1.1.2', 'q3', v.result.pct112);
-  setEntry(ENTRY_INVESTMENT_KPI, { status: 'confirmed', confirmedAt: new Date().toISOString(), confirmedBy: confirmedBy || 'ผู้รับผิดชอบ KPI' });
+  const issue=Object.assign({},getIssue('1.1','q3'));
+  const publishedReport={summary_text:`เบิกจ่ายจริงสะสม ${v.result.cumActual.toFixed(3)} ล้านบาท`,issue,values:JSON.parse(JSON.stringify(getInvestmentRaw())),confirmedAt:new Date().toISOString()};
+  setEntry(ENTRY_INVESTMENT_KPI, { status: 'confirmed', confirmedAt: publishedReport.confirmedAt, confirmedBy: confirmedBy || 'ผู้รับผิดชอบ KPI',publishedReport });
   return { ok: true, pct111: v.result.pct111, pct112: v.result.pct112 };
 }
 
@@ -439,7 +450,9 @@ function confirmPlanMonth(kpiId, monthKey, { confirmedPercent, confirmationNote,
   const m = entry.monthly[monthKey];
   if (!m || m.submission_status !== 'pending_confirmation') return { ok: false, issues: ['รายการนี้ไม่ได้อยู่ในสถานะรอยืนยัน'] };
   if (confirmedPercent === null || confirmedPercent === undefined || confirmedPercent === '') return { ok: false, issues: ['กรุณายืนยันค่า % (confirmed_percent)'] };
+  if (!Number.isFinite(Number(confirmedPercent)) || Number(confirmedPercent)<0 || Number(confirmedPercent)>100) return {ok:false,issues:['เปอร์เซ็นต์ต้องอยู่ระหว่าง 0–100']};
   const needsLevel = kpi.scoringMethod === 'milestone_manual';
+  if (needsLevel && confirmedLevel!==null && confirmedLevel!=='' && (!Number.isFinite(Number(confirmedLevel)) || Number(confirmedLevel)<1 || Number(confirmedLevel)>5)) return {ok:false,issues:['คะแนนต้องอยู่ระหว่าง 1–5']};
   if (needsLevel && (confirmedLevel === null || confirmedLevel === undefined || confirmedLevel === '')) {
     return { ok: false, issues: ['ตัวชี้วัดนี้ใช้มาตราวัดพิเศษ (ไม่ใช่เกณฑ์ 5 ระดับปกติ) — ผู้ดูแลระบบต้องเลือกระดับ (Level) เอง'] };
   }
@@ -460,7 +473,17 @@ function confirmPlanMonth(kpiId, monthKey, { confirmedPercent, confirmationNote,
   setEntry(kpiId, entry);
 
   // Only NOW does Q3 Actual reach the score engine (brief §C6/§I).
-  const overrideValue = needsLevel ? Number(confirmedLevel) : Number(confirmedPercent) / 100;
+  // Select latest reporting month, not the order in which approvals are clicked.
+  const previousMonths=entry.confirmedMonths || Object.fromEntries(ENTRY_Q3_MONTHS.filter(mm=>entry.monthly[mm.key]?.submission_status==='confirmed' && entry.adminConfirmation?.[mm.key]).map(mm=>[mm.key,JSON.parse(JSON.stringify({report:entry.monthly[mm.key],confirmation:entry.adminConfirmation[mm.key]}))]));
+  entry.confirmedMonths=Object.assign({},previousMonths,{[monthKey]:JSON.parse(JSON.stringify({report:m,confirmation:entry.adminConfirmation[monthKey]}))});
+  const keys=ENTRY_Q3_MONTHS.map(x=>x.key).filter(key=>entry.confirmedMonths[key]);
+  const latest=entry.confirmedMonths[keys[keys.length-1]];
+  const overrideValue=needsLevel?latest.confirmation.confirmed_level:latest.confirmation.confirmed_percent/100;
+  entry.publishedReport={quarterlyResult:overrideValue,actual:latest.confirmation.confirmed_percent/100,
+    summary_text:keys.map(key=>ENTRY_Q3_MONTHS.find(x=>x.key===key).label+' · '+entry.confirmedMonths[key].report.progress_text).join('\n'),
+    issue:{obstacle_text:keys.map(key=>entry.confirmedMonths[key].report.obstacle_text).filter(Boolean).join('\n'),solution_text:keys.map(key=>entry.confirmedMonths[key].report.solution_text).filter(Boolean).join('\n')},
+    evidence_links:keys.flatMap(key=>entry.confirmedMonths[key].report.evidence_links||[]),latestMonth:keys[keys.length-1],confirmedAt:new Date().toISOString()};
+  setEntry(kpiId,entry);
   ovrSet(kpiId, 'q3', overrideValue);
   return { ok: true, value: overrideValue };
 }
@@ -631,7 +654,7 @@ function addCriteriaRevision(kpiId, { newThresholds, boardApprovalDate, note, ev
 function computeManagementStatus(kpiId, q) {
   if (q !== 'q3') return null;
   const type = ENTRY_KPI_TYPE[kpiId];
-  if (!type) return null;
+  if (!type || type === 'report') return null;
   if (type === 'plan') {
     const entry = getEntry(kpiId);
     if (entry.status === 'not_started') return null;
@@ -674,6 +697,7 @@ function computeManagementStatus(kpiId, q) {
 function pilotChildIds(kpiId) {
   if (kpiId === '1.1') return ['1.1']; // shared raw dataset — one entry, not per-child
   if (kpiId === '2.7') return ['2.7.1', '2.7.2', '2.7.3.1', '2.7.3.2', '2.7.4'];
+  if (!MOU_DATA.kpis[kpiId]?.isLeaf) return reportLeaves(kpiId).map(k=>k.id);
   return [kpiId];
 }
 function leafStatusIcon(kpiId) {
@@ -688,6 +712,7 @@ function leafStatusIcon(kpiId) {
   }
   const type = ENTRY_KPI_TYPE[kpiId];
   const entry = getEntry(kpiId);
+  if(type==='report') return entry.status==='confirmed'?'confirmed':entry.status==='not_started'?'not_started':reportCalculate(kpiId).ok?'pending':'needs_review';
   if (type === 'numeric') {
     if (entry.status === 'confirmed') return 'confirmed';
     const v = validateNumeric(kpiId);
@@ -731,5 +756,5 @@ function resetQ3UatData() {
     if (store.annualFrameworks[k].length) store.annualFrameworks[k][0].status = 'active';
   });
   saveUatStore(store);
-  ENTRY_PILOT_IDS.concat(['1.1.1', '1.1.2', '2.7.1', '2.7.2', '2.7.3.1', '2.7.3.2', '2.7.4']).forEach(id => ovrClearQuarter(id, 'q3'));
+  Object.keys(MOU_DATA.kpis).forEach(id => ovrClearQuarter(id, 'q3'));
 }

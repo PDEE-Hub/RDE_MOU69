@@ -57,7 +57,9 @@ function kpiForScoring(kpiId) {
 function scoreAt(kpiId, q) {
   const kpi = kpiForScoring(kpiId);
   const input = getQuarterInput(kpiId, q);
-  return scoreLeafKPI(kpi, input, q);
+  const result=scoreLeafKPI(kpi,input,q);
+  if(typeof reportValue==='function') result.rawValue=reportValue(kpiId,q);
+  return result;
 }
 
 // ── Score a parent KPI (rollup of its children) at quarter q ──
@@ -115,6 +117,7 @@ function clearFilter() {
 }
 function toggleQuarterFilter(q) {
   filterState.quarter = filterState.quarter === q ? null : q;
+  bottomQ = filterState.quarter;
   renderHome();
 }
 function toggleLevelFilter(lv) {
@@ -213,7 +216,7 @@ const HOME_HIGHLIGHT_LABELS = {'1.1.2':'ร้อยละความสาม�
 function renderHome() {
   const root = document.getElementById('page-home');
   if (!root) return;
-  const activeQ = systemActiveQuarter();
+  const activeQ = filterState.quarter || systemActiveQuarter();
   const current = overallScoreAt(activeQ);
   const forecast = overallForecastScore();
   const highlightKpis = ['1.1.2','2.1.1','2.4','2.8'].map(id => MOU_DATA.kpis[id]);
@@ -237,6 +240,8 @@ function renderHome() {
               <div class="hl-kpi-id">${kpi.id} · น้ำหนัก ${kpi.weight}</div>
               <div class="hl-kpi-label">${HOME_HIGHLIGHT_LABELS[kpi.id]}</div>
               <div class="hl-kpi-scores" style="color:${homeScoreColor(s.level)}">${s.level !== null ? s.level.toFixed(4) : '—'}<span class="fc" style="color:${homeScoreColor(fc.level)}">${fc.level !== null ? 'คาดการณ์สิ้นปี ' + fc.level.toFixed(4) : 'คาดการณ์สิ้นปี —'}</span></div>
+              <div class="hl-kpi-meta">ผล ${ovpFmt(s.rawValue)} ${s.rawValue != null ? kpi.unit || '' : ''} · ${Q_LABEL[activeQ]}</div>
+              ${reportSummaryHtml(kpi.id,activeQ)}
               <div class="hl-kpi-bar"><div class="hl-kpi-bar-fill" style="width:${barPct}%;background:${homeScoreColor(s.level)}"></div></div>
               <div class="hl-kpi-meta"><span>${kpi.target != null ? 'Target: ' + kpi.target + ' ' + (kpi.unit || '') : 'คะแนนเป้าหมาย: ' + (kpi.targetScore ?? '—') + ' / 5'}</span></div>
             </div>`;
@@ -259,7 +264,7 @@ function renderHome() {
               <div class="score-card-label">คะแนนรอบ ${PERIOD_LABEL[activeQ]}</div>
               <div class="score-card-val" style="color:${lvColor(current)}">${current !== null ? current.toFixed(4) : '—'}<span class="score-of">/5</span></div>
               <div class="score-bar"><div class="score-bar-fill" style="width:${current ? current / 5 * 100 : 0}%;background:${lvColor(current)}"></div></div>
-              <div class="score-card-sub">${current !== null ? (current / TARGET_SCORE * 100).toFixed(2) + '% เทียบกับเป้าหมาย' : ''}</div>
+              <div class="score-card-sub">${quarterCoverageText(activeQ)}</div>
             </div>
             <div class="score-card">
               <div class="score-card-label">คะแนนคาดการณ์สิ้นปี</div>
@@ -327,7 +332,8 @@ function renderSummaryBox(activeQ, current) {
   const qs = ['q1','q2','q3','q4'];
   const prevQ = qs[qs.indexOf(activeQ)-1];
   const prev = prevQ ? overallScoreAt(prevQ) : null;
-  const delta = current !== null && prev !== null ? current-prev : null;
+  const complete = !quarterCoverageText(activeQ).includes('ยังไม่ครบ') && (!prevQ || !quarterCoverageText(prevQ).includes('ยังไม่ครบ'));
+  const delta = complete && current !== null && prev !== null ? current-prev : null;
   const dist = levelDistribution(activeQ);
   const keys = [1,2,3,4,5,'none'];
   const total = keys.reduce((n,k)=>n+dist[k],0);
@@ -335,7 +341,7 @@ function renderSummaryBox(activeQ, current) {
   const insight = dist.none === total ? 'ยังไม่มีข้อมูลผลการประเมินในไตรมาสนี้' : `ตัวชี้วัดกระจุกตัวมากที่สุดที่ Level ${dominant} (${dist[dominant]} ตัว) · Level 1 มี ${dist[1]} ตัวที่ควรติดตาม`;
   const label = k => k === 'none' ? 'ไม่มีข้อมูล' : 'Level '+k;
   const color = k => homeScoreColor(k === 'none' ? null : k);
-  el.innerHTML = `<div class="executive-movement" style="color:${delta === null || delta === 0 ? 'var(--home-text-2)' : delta>0 ? LV_COLORS[5] : LV_COLORS[1]}">${delta === null ? (current === null ? 'ยังไม่มีคะแนนสำหรับเปรียบเทียบ' : 'ไตรมาสแรกของปี · ยังไม่มีไตรมาสก่อนหน้าให้เปรียบเทียบ') : `${delta>0?'▲':delta<0?'▼':'—'} ${Math.abs(delta).toFixed(4)} เทียบ ${Q_LABEL[prevQ]}`}</div>
+  el.innerHTML = `<div class="executive-movement" style="color:${delta === null || delta === 0 ? 'var(--home-text-2)' : delta>0 ? LV_COLORS[5] : LV_COLORS[1]}">${delta === null ? (!complete ? 'ข้อมูลยังไม่ครบสำหรับเปรียบเทียบคะแนนระหว่างไตรมาส' : current === null ? 'ยังไม่มีคะแนนสำหรับเปรียบเทียบ' : 'ไตรมาสแรกของปี · ยังไม่มีไตรมาสก่อนหน้าให้เปรียบเทียบ') : `${delta>0?'▲':delta<0?'▼':'—'} ${Math.abs(delta).toFixed(4)} เทียบ ${Q_LABEL[prevQ]}`}</div>
     <div class="executive-insight">${insight}</div>
     <div class="executive-bar" role="img" aria-label="${keys.map(k=>dist[k]+' '+label(k)).join(', ')}">${keys.filter(k=>dist[k]>0).map(k=>`<span style="width:${total?dist[k]/total*100:0}%;background:${color(k)}" title="${dist[k]} ${label(k)}"></span>`).join('')}</div>
     <div class="executive-counts">${keys.map(k=>`<span><i style="background:${color(k)}"></i><b>${dist[k]}</b> ${label(k)}</span>`).join('')}</div>`;
@@ -361,7 +367,7 @@ function renderTrail(activeQ) {
  const qs=['q1','q2','q3','q4'];
  document.getElementById('trail').innerHTML=`<div class="quarter-scores">${qs.map(q=>{
  const v=overallScoreAt(q);
- return `<button class="quarter-score ${v===null?'empty':''} ${q===activeQ?'current':''}" onclick="toggleQuarterFilter('${q}')"><span>${Q_LABEL[q]}</span><strong>${v===null?'—':v.toFixed(4)}</strong><small>${v===null?'ยังไม่มีข้อมูล':'คะแนนผลจริง'}</small>${q===activeQ?`<img src="${MASCOT_RUN_IMG}" alt="ไตรมาสปัจจุบัน">`:''}</button>`;
+ return `<button class="quarter-score ${v===null?'empty':''} ${q===activeQ?'current':''}" onclick="toggleQuarterFilter('${q}')"><span>${Q_LABEL[q]}</span><strong>${v===null?'—':v.toFixed(4)}</strong><small>${v===null?'ยังไม่มีข้อมูล':quarterCoverageText(q).includes('ยังไม่ครบ')?'คะแนนจากข้อมูลที่มี':'คะแนนผลจริง'}</small>${q===activeQ?`<img src="${MASCOT_RUN_IMG}" alt="ไตรมาสปัจจุบัน">`:''}</button>`;
  }).join('')}</div><div class="quarter-reference">ค่าอ้างอิงสิ้นปี · เป้าหมาย <b>${TARGET_SCORE.toFixed(4)}</b> · คาดการณ์ <b>${overallForecastScore()===null?'ยังไม่มีข้อมูล':overallForecastScore().toFixed(4)}</b></div>`;
 }
 
@@ -462,11 +468,13 @@ function openQuickDetail(kpiId, q) {
       </div>
       <div class="qd-body">
         <div class="qd-row"><span>ไตรมาส</span><b>${Q_LABEL[q]}</b></div>
-        <div class="qd-row"><span>ผลจริง</span><b>${s.rawValue ?? 'ยังไม่มีข้อมูล'}</b></div>
+        <div class="qd-row"><span>ผลจริง</span><b>${q !== 'forecast' && kpi.isLeaf ? reportValueText(kpiId,q) : entryEsc(String(s.rawValue ?? 'ยังไม่มีข้อมูล'))}</b></div>
         <div class="qd-row"><span>คะแนน</span><b style="color:${lvColor(s.level)}">${s.level !== null ? s.level.toFixed(4) : '—'}</b></div>
         <div class="qd-row"><span>น้ำหนัก</span><b>${kpi.weight}</b></div>
         <div class="qd-row"><span>คะแนนถ่วงน้ำหนัก</span><b>${s.weightedValue !== null ? s.weightedValue.toFixed(4) : '—'}</b></div>
         <div class="qd-row"><span>ผู้รับผิดชอบ</span><b>${owner}</b></div>
+        ${reportSummaryHtml(kpiId,q)}
+        <button class="cta-btn" onclick="openDetailAt('${kpiId}','${q}')">ดูรายละเอียดไตรมาสนี้ →</button>
         ${ded ? `<div class="qd-warn">⚠ เงื่อนไขหักคะแนน: ${ded.reason}<br>สถานะ: ${ded.status}</div>` : ''}
         ${kpi.needsConfirmation ? `<div class="qd-warn">🔺 ${kpi.confirmationNote}</div>` : ''}
         ${(() => {
@@ -488,7 +496,7 @@ function closeQuickDetail() {
 
 function renderIssues() {
   const el = document.getElementById('issues');
-  const activeQ = systemActiveQuarter();
+  const activeQ = filterState.quarter || systemActiveQuarter();
   const urgent = priorityKpis(activeQ, 99); // same "ต้องเร่ง" definition as the bottom priority box
   const MAX_SHOWN = 5;
 
@@ -529,13 +537,10 @@ const OVP_MAIN_IDS = ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '2.3', '2.4', '2
 const ovpState = { quarter: null, quick: 'all', group: '', ownerWatch: '', ownerSupport: '', search: '', expanded: new Set() };
 
 // ═══════════════════════════════════════════════════════════
-// DETAIL — "รายละเอียดตัวชี้วัด" (this round: real UI for KPI 2.4 only, per RDE Master
-// Mockup + confirmed audit. Every other KPI ID routes to the plain placeholder below —
-// no Detail UI is built for them this round. Reuses ovpChildren/ovpFmt/ovpBadge/scoreAt/
-// scoreParentAt/lvColor/Q_LABEL as-is; nothing here re-derives a score.)
+// DETAIL — shared confirmed records for all KPI types; preserve the approved 2.4 layout.
 // ═══════════════════════════════════════════════════════════
-let detailRouteKpiId = null;
-let dtlQuarter = 'q2'; // V1 default per brief — only q1/q2 are evaluated
+let detailRouteKpiId = '2.4';
+let dtlQuarter = 'q3'; // Source-backed detail pilot; other pages retain their current dataset.
 
 const DETAIL_SECTIONS = [
   { key: 'strategy', title: 'ตัวชี้วัดตามยุทธศาสตร์', ids: ['1.1', '1.2', '1.3', '1.4'] },
@@ -549,11 +554,11 @@ const dtlNodeExpanded = new Set();
 
 const NOT_RECORDED = 'ยังไม่ได้บันทึกข้อมูลนี้';
 const NOT_ATTACHED = 'ยังไม่มีเอกสารแนบ';
-const NOT_EVALUATED_TXT = 'ยังไม่มีข้อมูล (ยังไม่ถึงรอบประเมิน)';
-const DTL_MONTH_LABEL = { m1: 'ต.ค.', m2: 'พ.ย.', m3: 'ธ.ค.', m4: 'ม.ค.', m5: 'ก.พ.', m6: 'มี.ค.', m7: 'เม.ย.', m8: 'พ.ค.', m9: 'มิ.ย.' };
-const DTL_MONTH_KEYS = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9'];
+const NOT_EVALUATED_TXT = 'ยังไม่มีผลที่ยืนยันในไตรมาสนี้';
+const DTL_MONTH_LABEL = { m1: 'ต.ค.', m2: 'พ.ย.', m3: 'ธ.ค.', m4: 'ม.ค.', m5: 'ก.พ.', m6: 'มี.ค.', m7: 'เม.ย.', m8: 'พ.ค.', m9: 'มิ.ย.', m10: 'ก.ค.', m11: 'ส.ค.', m12: 'ก.ย.' };
+const DTL_MONTH_KEYS = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12'];
 
-function dtlGoTo(id) { detailRouteKpiId = id; dtlQuarter = 'q2'; renderDetail(); }
+function dtlGoTo(id) { detailRouteKpiId = id; dtlQuarter = dtlQuarter || systemActiveQuarter(); renderDetail(); }
 function dtlSetQuarter(q) { dtlQuarter = q; renderDetail(); }
 function dtlToggleSection(key) { if (dtlSectionCollapsed.has(key)) dtlSectionCollapsed.delete(key); else dtlSectionCollapsed.add(key); renderDetail(); }
 function dtlToggleNode(id) { if (dtlNodeExpanded.has(id)) dtlNodeExpanded.delete(id); else dtlNodeExpanded.add(id); renderDetail(); }
@@ -575,8 +580,8 @@ function dtlNodeHtml(kpiId, activeId, depth) {
   const hasKids = kids.length > 0;
   const expanded = hasKids && dtlIsNodeExpanded(kpiId);
   const isActive = kpiId === activeId;
-  const q = systemActiveQuarter();
-  const s = kpi.isLeaf ? scoreAt(kpiId, q) : scoreParentAt(kpiId, q);
+  const q = dtlQuarter;
+  const s = kpiId === '2.4' ? dtl24Score(q) : kpi.isLeaf ? scoreAt(kpiId, q) : scoreParentAt(kpiId, q);
   const chip = s.level !== null ? `<span class="dtl-score-chip" style="background:${lvColor(s.level)}">${s.level.toFixed(2)}</span>` : '';
   const caret = hasKids
     ? `<span class="dtl-caret" onclick="event.stopPropagation();dtlToggleNode('${kpiId}')">${expanded ? '▾' : '▸'}</span>`
@@ -622,22 +627,45 @@ function dtlOwnersHtml(kpi) {
 function dtlPlaceholderMain(id) {
   const kpi = MOU_DATA.kpis[id];
   if (!kpi) return `<div class="stub-note">เลือกตัวชี้วัดจากเมนูด้านซ้ายเพื่อดูรายละเอียด</div>`;
-  return `<div class="stub-note">ตัวชี้วัด ${kpi.id} — ${kpi.label}<br>หน้ารายละเอียดตัวชี้วัดนี้อยู่ระหว่างพัฒนา</div>`;
+  return `<div class="stub-note">ตัวชี้วัด ${kpi.id} — ${kpi.label}<br>ไม่พบข้อมูลตัวชี้วัดนี้</div>`;
 }
 
-// §5A source: MOU_DATA.monthly (sheet "9. ผลรายเดือน", ต.ค.-มี.ค. only — V1 rule).
-// Quarter Result / Cumulative Result are computed here from the raw months, never
-// pre-baked into the data file and never fed back into engine.js scoring.
-// KPI 2.4's Q3 months live in entry_store.js (Entry tab UAT input, brief §4) — merged in
-// here for display only; scoring itself always goes through getQuarterInput/scoreAt.
+// All views consume the same confirmed input. Q3/Q4 have no Excel fallback.
+function dtl24Input(q) { return getQuarterInput('2.4', q); }
+function dtl24Score(q) { return scoreAt('2.4', q); }
+function publishedQuarterReport(kpiId, q) {
+  if(q==='q3' && kpiId.startsWith('1.1') && getQuarterInput('1.1.1',q)!==null) return getEntry('1.1').publishedReport || null;
+  if(q==='q3' && !MOU_DATA.kpis[kpiId]?.isLeaf) { const records=ovpChildren(kpiId).map(k=>[k,publishedQuarterReport(k.id,q)]).filter(x=>x[1]); return records.length?{summary_text:records.map(([k,r])=>k.id+' '+k.label+' · '+(r.summary_text||'')).join('\n'),issue:{obstacle_text:records.map(([k,r])=>r.issue?.obstacle_text?k.id+' '+r.issue.obstacle_text:'').filter(Boolean).join('\n'),solution_text:records.map(([k,r])=>r.issue?.solution_text?k.id+' '+r.issue.solution_text:'').filter(Boolean).join('\n')}}:null; }
+  if (q !== 'q3' || typeof getEntry !== 'function' || getQuarterInput(kpiId,q) === null) return null;
+  const entry = getEntry(kpiId);
+  if (entry.publishedReport) return entry.publishedReport;
+  // Existing confirmed sessions keep their values; no draft is promoted.
+  if (entry.type === 'numeric' && entry.status === 'confirmed') return {
+    monthly:entry.monthly, summary_text:entry.summary_text || '', issue:getIssue(kpiId,q)
+  };
+  return null;
+}
+function reportText(kpiId, q, field) {
+  const report = publishedQuarterReport(kpiId,q);
+  return report ? (field === 'summary_text' ? report.summary_text : report.issue?.[field]) || '' : '';
+}
+function reportSummaryHtml(kpiId,q) {
+  const parts = [['summary_text','สรุปผล'],['obstacle_text','ปัญหา / อุปสรรค'],['solution_text','การดำเนินการต่อ']];
+  return parts.map(([key,label])=>{const val=reportText(kpiId,q,key);return val ? `<div class="reported-text"><b>${label}:</b> ${entryEsc(val)}</div>` : '';}).join('');
+}
+function quarterCoverageText(q) {
+  const leaves = Object.values(MOU_DATA.kpis).filter(k=>k.isLeaf);
+  const n = leaves.filter(k=>getQuarterInput(k.id,q)!==null).length;
+  return `มีผล ${n}/${leaves.length} ตัวชี้วัดย่อย` + (n<leaves.length ? ' · คะแนนสะสมจากข้อมูลที่มี ยังไม่ครบไตรมาส' : '');
+}
+function openDetailAt(kpiId,q) {
+  detailRouteKpiId=kpiId; dtlQuarter=QUARTERS.includes(q)?q:systemActiveQuarter();
+  closeQuickDetail(); switchTab('detail',document.getElementById('tabBtnDetail'));
+}
 function dtlMonthlySeries(kpiId) {
-  const m = MOU_DATA.monthly[kpiId];
-  const base = (m && m.components.length) ? m.components[0].months : null;
-  if (kpiId === '2.4' && typeof getEntry === 'function') {
-    const q3 = getEntry('2.4').monthly; // {m7,m8,m9} normalized to Master unit, or null
-    const hasAny = ['m7', 'm8', 'm9'].some(k => q3[k] !== null && q3[k] !== undefined);
-    if (hasAny) return Object.assign({}, base || {}, q3);
-  }
+  const base = Object.assign({},MOU_DATA.monthly[kpiId]?.components[0]?.months || {});
+  const report = publishedQuarterReport(kpiId,'q3');
+  if (report?.monthly) Object.assign(base, report.monthly);
   return base;
 }
 function dtlQuarterSumFromMonthly(months, q) {
@@ -647,62 +675,62 @@ function dtlQuarterSumFromMonthly(months, q) {
   return keys.reduce((sum, k) => sum + months[k], 0);
 }
 function dtlCumulativeFromMonthly(months, q) {
-  const q1 = dtlQuarterSumFromMonthly(months, 'q1');
-  if (q === 'q1') return q1;
-  const q2 = dtlQuarterSumFromMonthly(months, 'q2');
-  if (q === 'q2') return (q1 === null || q2 === null) ? null : q1 + q2;
-  const q3 = dtlQuarterSumFromMonthly(months, 'q3');
-  return (q1 === null || q2 === null || q3 === null) ? null : q1 + q2 + q3;
+  if (!months || !QUARTERS.includes(q)) return null;
+  const keys = Array.from({length:(QUARTERS.indexOf(q)+1)*3}, (_,i)=>'m'+(i+1));
+  return keys.every(k=>Number.isFinite(months[k])) ? keys.reduce((sum,k)=>sum+months[k],0) : null;
 }
 
 function dtl24Main() {
   const kpi = kpiForScoring('2.4');
   const q = dtlQuarter;
-  const isEvaluated = getQuarterInput('2.4', q) !== null;
-  const s = isEvaluated ? scoreAt('2.4', q) : { level: null, rawValue: null };
+  const isEvaluated = dtl24Input(q) !== null;
+  const s = isEvaluated ? dtl24Score(q) : { level: null, rawValue: null };
   const fc = MOU_DATA.forecast['2.4'];
   const months = dtlMonthlySeries('2.4');
-  // §3/§4 use the monthly-summed cumulative (per confirmed spec, e.g. Q2 = 5.445) —
-  // a display-layer cross-check, distinct from the engine's own scoring input
-  // (§2 cards use s.rawValue = 5.44, exactly as scoreAt/engine.js already computed it).
-  const cumulative = isEvaluated ? dtlCumulativeFromMonthly(months, q) : null;
+  const quarterMonthly = dtlQuarterSumFromMonthly(months,q);
+  const monthlyCumulative = isEvaluated ? (q === 'q3' ? (quarterMonthly === null ? null : priorCumulative('2.4') + quarterMonthly) : dtlCumulativeFromMonthly(months, q)) : null;
+  const cumulative = isEvaluated ? s.rawValue : null;
+  const reconciliation = monthlyCumulative !== null && cumulative !== null ? monthlyCumulative - cumulative : null;
+  const localInput = getOverrides()['2.4']?.[q] !== undefined;
   const target = kpi.target;
   const progressPct = (cumulative !== null && target) ? (cumulative / target * 100) : null;
   const remainingGap = (cumulative !== null && target) ? (target - cumulative) : null;
   const qd = MOU_DATA.quarterly['2.4'];
-  const noteForQuarter = (isEvaluated && qd && qd[q]) ? qd[q].note : null;
+  const noteForQuarter = q === 'q3' ? reportText('2.4',q,'summary_text') : (isEvaluated && qd && qd[q]) ? qd[q].note : null;
   const dedItem = MOU_DATA.deductions.find(d => d.kpi === '2.4');
   const assignItem = MOU_DATA.assignments.find(a => a.kpi === '2.4');
 
   const headerMeta = [
     ['กลุ่ม KPI', kpi.groupLabel || '—'],
     ['หน่วย', kpi.unit || '—'],
-    ['น้ำหนัก', kpi.weight ?? '—'],
-    ['ความถี่', '—'],
+    ['น้ำหนัก', `${kpi.weight ?? '—'}%`],
+    ['รอบข้อมูล', 'รายเดือน / สรุปรายไตรมาส'],
     ['ผู้บริหารกำกับ', (kpi.ownerWatch || []).join(', ') || '—'],
     ['ผู้รับผิดชอบหลัก', (kpi.ownerMain || []).join(', ') || '—'],
     ['ผู้รับผิดชอบสนับสนุน', (kpi.ownerSupport || []).join(', ') || '—'],
   ];
 
   const qBtn = (qq, label) => {
-    const evaluated = getQuarterInput('2.4', qq) !== null;
-    return `<button class="dtl-qbtn ${dtlQuarter === qq ? 'active' : ''} ${!evaluated ? 'disabled' : ''}" onclick="${evaluated ? `dtlSetQuarter('${qq}')` : ''}" title="${evaluated ? '' : 'not_evaluated'}">${label}</button>`;
+    const evaluated = dtl24Input(qq) !== null;
+    return `<button class="dtl-qbtn ${dtlQuarter === qq ? 'active' : ''} ${!evaluated ? 'empty' : ''}" onclick="dtlSetQuarter('${qq}')" aria-pressed="${dtlQuarter === qq}" title="${evaluated ? '' : 'ยังไม่มีผลการประเมิน'}">${label}</button>`;
   };
 
-  const monthCount = q === 'q1' ? 3 : q === 'q2' ? 6 : 9;
-  const monthEndLabel = { q1: 'ธ.ค.', q2: 'มี.ค.', q3: 'มิ.ย.' }[q] || 'มี.ค.';
+  const monthCount = q === 'q1' ? 3 : q === 'q2' ? 6 : q === 'q3' ? 9 : 12;
+  const monthEndLabel = { q1: 'ธ.ค.', q2: 'มี.ค.', q3: 'มิ.ย.', q4: 'ก.ย.' }[q] || 'มี.ค.';
   const monthlyMini = (months && isEvaluated)
     ? `<div class="dtl-monthly-mini">
-        <div class="dtl-monthly-mini-title">ข้อมูลรายเดือน (raw, ต.ค.-${monthEndLabel} 69)</div>
+        <div class="dtl-monthly-mini-title">ข้อมูลรายเดือน · ต.ค. 2568–${monthEndLabel} 2569 · ${kpi.unit}</div>
         <div class="dtl-monthly-mini-row">${DTL_MONTH_KEYS.slice(0, monthCount).map(mk => `<span>${DTL_MONTH_LABEL[mk]} <b>${months[mk] !== undefined && months[mk] !== null ? months[mk].toLocaleString('en-US', { maximumFractionDigits: 3 }) : '—'}</b></span>`).join('')}</div>
       </div>`
     : `<div class="dtl-monthly-mini"><div class="dtl-support-val empty">${NOT_RECORDED}</div></div>`;
 
   const qRows = ['q1', 'q2', 'q3', 'q4'].map(qq => {
-    const evaluated = getQuarterInput('2.4', qq) !== null;
-    const rs = evaluated ? scoreAt('2.4', qq) : null;
-    const cum = evaluated ? dtlCumulativeFromMonthly(months, qq) : null;
-    const qResult = evaluated ? dtlQuarterSumFromMonthly(months, qq) : null;
+    const evaluated = dtl24Input(qq) !== null;
+    const rs = evaluated ? dtl24Score(qq) : null;
+    const cum = evaluated ? rs.rawValue : null;
+    const priorQ = {q2:'q1',q3:'q2',q4:'q3'}[qq];
+    const prior = priorQ ? dtl24Input(priorQ) : 0;
+    const qResult = evaluated && prior !== null ? cum - prior : null;
     const pct = (cum !== null && target) ? (cum / target * 100) : null;
     if (!evaluated) {
       return `<tr>
@@ -714,7 +742,7 @@ function dtl24Main() {
     }
     return `<tr>
       <td>${Q_LABEL[qq]}</td>
-      <td><b>${cum !== null ? cum.toLocaleString('en-US', { maximumFractionDigits: 3 }) : '—'}</b> ${kpi.unit || ''}<div style="font-size:10.5px;color:var(--text3)">ผลเฉพาะไตรมาสนี้: ${qResult !== null ? qResult.toLocaleString('en-US', { maximumFractionDigits: 3 }) : '—'}</div></td>
+      <td><b>${cum !== null ? cum.toLocaleString('en-US', { maximumFractionDigits: 3 }) : '—'}</b> ${kpi.unit || ''}<div style="font-size:12px;color:var(--text3)">ผลเฉพาะไตรมาสนี้: ${qResult !== null ? qResult.toLocaleString('en-US', { maximumFractionDigits: 3 }) : '—'}</div></td>
       <td>${pct !== null ? pct.toFixed(2) + '%' : '—'}</td>
       <td>${ovpBadge(rs.level)}</td>
       <td>${ovpBadge(kpi.targetScore)}</td>
@@ -729,22 +757,23 @@ function dtl24Main() {
       <div class="dtl-meta-grid">${headerMeta.map(([label, val]) => `<div class="dtl-meta-item">${label}<b>${val}</b></div>`).join('')}</div>
       <div class="dtl-quarter-tabs">
         ${qBtn('q1', 'Q1 (3 เดือน)')}
-        ${qBtn('q2', 'Q2 (6 เดือน) — ปัจจุบัน')}
+        ${qBtn('q2', 'Q2 (6 เดือน)')}
         ${qBtn('q3', 'Q3 (9 เดือน)')}
         ${qBtn('q4', 'Q4 (12 เดือน)')}
       </div>
+      <div class="dtl-source-note">${localInput ? 'ผลจากหน้ากรอกข้อมูล · ใช้ข้อมูลที่ยืนยันชุดเดียวกับภาพรวมและ Home' : q === 'q1' || q === 'q2' ? 'ผลตั้งต้น Q1–Q2 จาก MOU69_Claude.xlsx' : 'รอคุณกรอกและยืนยันผลในหน้ากรอกข้อมูล'}</div>
     </div>
 
     <div class="dtl-cards">
       <div class="dtl-card c-actual">
         <div class="dtl-card-label">ผลสะสมปัจจุบัน (ถึงสิ้น ${Q_LABEL[q]})</div>
-        <div class="dtl-card-val">${isEvaluated ? `${ovpFmt(s.rawValue)} / ${ovpFmt(target)}` : 'not_evaluated'}</div>
+        <div class="dtl-card-val">${isEvaluated ? `${ovpFmt(s.rawValue)} / ${ovpFmt(target)}` : 'ยังไม่มีข้อมูล'}</div>
         <div class="dtl-card-sub">${kpi.unit || ''} — ผลสะสมตั้งแต่ต้นปีถึงสิ้นไตรมาสนี้ ไม่ใช่ผลเฉพาะไตรมาส</div>
       </div>
       <div class="dtl-card c-score">
         <div class="dtl-card-label">คะแนนปัจจุบัน (${Q_LABEL[q]})</div>
         <div class="dtl-card-val">${isEvaluated && s.level !== null ? s.level.toFixed(4) : '—'}</div>
-        <div class="dtl-card-sub">${isEvaluated ? '' : 'not_evaluated'}</div>
+        <div class="dtl-card-sub">${isEvaluated ? '' : 'ยังไม่มีข้อมูล'}</div>
       </div>
       <div class="dtl-card c-fcresult">
         <div class="dtl-card-label">คาดการณ์สิ้นปี</div>
@@ -758,25 +787,27 @@ function dtl24Main() {
     </div>
 
     <div class="dtl-section-card">
+      <div class="dtl-source-note">เป้าหมายใน Excel ${ovpFmt(target)} ${kpi.unit} · เกณฑ์ 5 คะแนน ${ovpFmt(kpi.thresholds[4])} ${kpi.unit}</div>
       <div class="card-title">ความก้าวหน้าเทียบเป้าหมายสิ้นปี</div>
-      <div class="dtl-progress-labels"><span>Start · 0</span><span>Target · ${ovpFmt(target)} ${kpi.unit || ''}</span></div>
+      <div class="dtl-progress-labels"><span>เริ่มต้น · 0</span><span>เป้าหมายตาม Excel · ${ovpFmt(target)} ${kpi.unit || ''}</span></div>
       <div class="dtl-progress-track"><div class="dtl-progress-fill" style="width:${progressPct !== null ? Math.min(progressPct, 100) : 0}%"></div></div>
       <div class="dtl-progress-stats">
-        <div class="dtl-progress-stat">% Progress to Target<b>${progressPct !== null ? progressPct.toFixed(2) + '%' : '—'}</b></div>
-        <div class="dtl-progress-stat">Remaining Gap<b>${remainingGap !== null ? remainingGap.toLocaleString('en-US', { maximumFractionDigits: 3 }) + ' ' + (kpi.unit || '') : '—'}</b></div>
-        <div class="dtl-progress-stat">Cumulative Result<b>${cumulative !== null ? cumulative.toLocaleString('en-US', { maximumFractionDigits: 3 }) : '—'}</b></div>
+        <div class="dtl-progress-stat">ความก้าวหน้าเทียบเป้าหมาย<b>${progressPct !== null ? progressPct.toFixed(2) + '%' : '—'}</b></div>
+        <div class="dtl-progress-stat">ส่วนต่างจากเป้าหมาย<b>${remainingGap !== null ? remainingGap.toLocaleString('en-US', { maximumFractionDigits: 3 }) + ' ' + (kpi.unit || '') : '—'}</b></div>
+        <div class="dtl-progress-stat">ผลสะสมตามรายไตรมาส<b>${cumulative !== null ? cumulative.toLocaleString('en-US', { maximumFractionDigits: 3 }) : '—'}</b></div>
       </div>
       ${monthlyMini}
+      ${reconciliation !== null ? `<div class="dtl-reconciliation ${Math.abs(reconciliation)>0.0000001 ? 'needs-review' : ''}"><b>${Math.abs(reconciliation)>0.0000001 ? 'รอตรวจสอบยอดรายเดือนกับรายไตรมาส' : 'ยอดรายเดือนตรงกับรายไตรมาส'}</b><br>${q === 'q3' ? 'ยอดสะสม Q2 + ผลรายเดือน Q3' : 'รวมรายเดือน'} ${monthlyCumulative.toFixed(3)} · ผลสะสมที่ใช้คำนวณคะแนน ${cumulative.toFixed(3)} · ส่วนต่าง ${reconciliation.toFixed(3)} ${kpi.unit}<br>${q === 'q3' ? 'ใช้ยอดสะสม Q2 เป็นฐานเดียวกับหน้ากรอกข้อมูล' : 'คะแนนและความก้าวหน้าใช้ผลตั้งต้นรายไตรมาส'}</div>` : ''}
     </div>
 
     <div class="dtl-section-card">
       <div class="card-title">เปรียบเทียบรายไตรมาส (ใช้ผลสะสมสิ้นไตรมาสเป็นค่าหลัก)</div>
       <table class="dtl-qtable">
-        <thead><tr><th>ไตรมาส</th><th>ผลสะสมสิ้นไตรมาส</th><th>% เทียบเป้าหมายสิ้นปี</th><th>คะแนน (Score)</th><th>Target Score</th></tr></thead>
+        <thead><tr><th>ไตรมาส</th><th>ผลสะสมสิ้นไตรมาส</th><th>% เทียบเป้าหมายสิ้นปี</th><th>คะแนน</th><th>คะแนนเป้าหมาย</th></tr></thead>
         <tbody>${qRows}</tbody>
       </table>
       <div class="dtl-forecast-row">
-        <b>คาดการณ์สิ้นปี (Forecast) — ค่าเดียว ไม่แยกรายไตรมาส:</b>
+        <b>คาดการณ์สิ้นปี · ข้อมูล ณ 1 ส.ค. 2569:</b>
         <span>ผล ${fc ? ovpFmt(fc.result) : '—'}</span>
         <span>คะแนน ${fc && fc.score !== undefined ? ovpBadge(fc.score) : ovpBadge(null)}</span>
       </div>
@@ -787,12 +818,12 @@ function dtl24Main() {
       <div class="dtl-support-grid">
         <div class="dtl-support-item"><div class="dtl-support-label">เอกสารแนบ</div><div class="dtl-support-val empty">${NOT_ATTACHED}</div></div>
         <div class="dtl-support-item"><div class="dtl-support-label">คำจำกัดความ / เงื่อนไข</div><div class="dtl-support-val empty">${NOT_RECORDED}</div></div>
-        <div class="dtl-support-item"><div class="dtl-support-label">สูตรการคำนวณ</div><div class="dtl-support-val empty">${NOT_RECORDED}</div></div>
+        <div class="dtl-support-item"><div class="dtl-support-label">สูตรการคำนวณ</div><div class="dtl-support-val">คะแนนคำนวณเทียบเกณฑ์ 1–5 แบบเชิงเส้น โดยจำกัดช่วงคะแนน 1–5 · ผลเฉพาะไตรมาส = ผลสะสมไตรมาสนี้ − ผลสะสมไตรมาสก่อน</div></div>
         <div class="dtl-support-item"><div class="dtl-support-label">ประวัติการปรับปรุงเกณฑ์</div><div class="dtl-support-val ${kpi.criteriaRevisionNote ? '' : 'empty'}">${kpi.criteriaRevisionNote ? `มีการปรับค่าเกณฑ์ตามมติคณะกรรมการ กทท. เมื่อวันที่ ${kpi.criteriaBoardApprovalDate || '—'} — ${kpi.criteriaRevisionNote}` : 'ยังไม่มีข้อมูลประวัติ'}</div></div>
         <div class="dtl-support-item" style="grid-column:1/-1">
-          <div class="dtl-support-label">เกณฑ์ Level 1-5 (Threshold ${kpi.criteriaRevisionNote ? 'ปัจจุบัน — ปรับปรุงแล้ว' : 'จริงใน Master Data'})</div>
+          <div class="dtl-support-label">เกณฑ์คะแนน 1–5 · ${kpi.unit} ${kpi.criteriaRevisionNote ? '(ปรับปรุงแล้ว)' : '(ตาม Excel)'}</div>
           <table class="dtl-criteria-table">
-            <thead><tr><th>Level 1</th><th>Level 2</th><th>Level 3</th><th>Level 4</th><th>Level 5</th></tr></thead>
+            <thead><tr><th style="background:${LV_COLORS[1]};color:#293750">1 คะแนน</th><th style="background:${LV_COLORS[2]};color:#293750">2 คะแนน</th><th style="background:${LV_COLORS[3]};color:#293750">3 คะแนน</th><th style="background:${LV_COLORS[4]};color:#293750">4 คะแนน</th><th style="background:${LV_COLORS[5]};color:#293750">5 คะแนน</th></tr></thead>
             <tbody><tr>${kpi.thresholds.map(t => `<td>${t}</td>`).join('')}</tr></tbody>
           </table>
         </div>
@@ -802,16 +833,16 @@ function dtl24Main() {
     <div class="dtl-section-card">
       <div class="card-title">ประเด็นที่ต้องปรับปรุง/เฝ้าระวัง</div>
       <div class="dtl-support-grid">
-        <div class="dtl-support-item"><div class="dtl-support-label">ปัญหา/อุปสรรค (จากเงื่อนไขหักคะแนน)</div><div class="dtl-support-val ${dedItem ? '' : 'empty'}">${dedItem ? dedItem.reason : NOT_RECORDED}</div></div>
-        <div class="dtl-support-item"><div class="dtl-support-label">แนวทางแก้ไข/เร่งรัด (จากมติที่ประชุม)</div><div class="dtl-support-val ${assignItem ? '' : 'empty'}">${assignItem ? assignItem.note : NOT_RECORDED}</div></div>
+        <div class="dtl-support-item"><div class="dtl-support-label">ปัญหา / อุปสรรค</div><div class="dtl-support-val ${dedItem ? '' : 'empty'}">${q === 'q3' ? entryEsc(reportText('2.4',q,'obstacle_text')) || NOT_RECORDED : dedItem ? dedItem.reason : NOT_RECORDED}</div></div>
+        <div class="dtl-support-item"><div class="dtl-support-label">แนวทางแก้ไข / การดำเนินการต่อ</div><div class="dtl-support-val ${assignItem ? '' : 'empty'}">${q === 'q3' ? entryEsc(reportText('2.4',q,'solution_text')) || NOT_RECORDED : assignItem ? assignItem.note : NOT_RECORDED}</div></div>
       </div>
     </div>
 
     <div class="dtl-section-card">
       <div class="card-title">แนวโน้มและข้อสังเกต</div>
       <div class="dtl-support-grid">
-        <div class="dtl-support-item"><div class="dtl-support-label">หมายเหตุผลการดำเนินงาน (${Q_LABEL[q]})</div><div class="dtl-support-val ${noteForQuarter ? '' : 'empty'}">${noteForQuarter || (isEvaluated ? NOT_RECORDED : NOT_EVALUATED_TXT)}</div></div>
-        <div class="dtl-support-item"><div class="dtl-support-label">Forecast Commentary</div><div class="dtl-support-val ${fc && fc.note ? '' : 'empty'}">${(fc && fc.note) || NOT_RECORDED}</div></div>
+        <div class="dtl-support-item"><div class="dtl-support-label">หมายเหตุผลการดำเนินงาน (${Q_LABEL[q]})</div><div class="dtl-support-val ${noteForQuarter ? '' : 'empty'}">${entryEsc(noteForQuarter || '') || (isEvaluated ? NOT_RECORDED : 'รอกรอกข้อมูลในไตรมาสนี้')}</div></div>
+        <div class="dtl-support-item"><div class="dtl-support-label">คำอธิบายการคาดการณ์</div><div class="dtl-support-val ${fc && fc.note ? '' : 'empty'}">${(fc && fc.note) || NOT_RECORDED}</div></div>
       </div>
     </div>
   `;
@@ -823,8 +854,8 @@ function renderDetail() {
   const activeId = detailRouteKpiId;
   root.innerHTML = `<div class="dtl-shell">
     <aside class="dtl-sidebar">${dtlSidebarHtml(activeId)}</aside>
-    <div class="dtl-main">${activeId === '2.4' ? dtl24Main() : dtlPlaceholderMain(activeId)}</div>
-    <aside class="dtl-owners">${activeId === '2.4' ? dtlOwnersHtml(MOU_DATA.kpis['2.4']) : ''}</aside>
+    <div class="dtl-main">${activeId === '2.4' ? dtl24Main() : MOU_DATA.kpis[activeId] ? reportDetailHtml(activeId) : dtlPlaceholderMain(activeId)}</div>
+    <aside class="dtl-owners">${MOU_DATA.kpis[activeId] ? dtlOwnersHtml(MOU_DATA.kpis[activeId]) : ''}</aside>
   </div>`;
 }
 
@@ -917,7 +948,7 @@ function ovpActualCell(kpi, s) {
   if (s.rawValue === null || s.rawValue === undefined) {
     return '<span class="ovp-cell-missing" title="missing — ยังไม่มีข้อมูลในไตรมาสนี้ (not_evaluated)">—</span>';
   }
-  return ovpFmt(s.rawValue);
+  return ['milestone_pct','milestone_manual'].includes(kpi.scoringMethod) ? `${(Number(s.rawValue)*100).toFixed(2)}%` : entryEsc(String(ovpFmt(s.rawValue)));
 }
 
 function ovpRowHtml(kpi, depth, q) {
@@ -935,7 +966,7 @@ function ovpRowHtml(kpi, depth, q) {
     : `<span class="ovp-caret spacer">▶</span>`;
   return `<tr class="${rowClass}">
     <td><div class="ovp-id-cell">${indent}<b>${kpi.id}</b></div></td>
-    <td class="ovp-name-cell">${kpi.label}</td>
+    <td class="ovp-name-cell">${kpi.label}${reportSummaryHtml(kpi.id,q)}</td>
     <td>${kpi.groupLabel || '—'}</td>
     <td>${kpi.weight ?? '—'}</td>
     <td>${kpi.unit || '—'}</td>
@@ -981,7 +1012,7 @@ function ovpClear() {
 }
 function ovpDetailClick(kpiId) {
   detailRouteKpiId = kpiId;
-  dtlQuarter = 'q2';
+  dtlQuarter = ovpActiveQuarter();
   const btn = document.getElementById('tabBtnDetail');
   if (btn) btn.click();
 }
@@ -1012,7 +1043,7 @@ function renderOverview() {
       <div class="ovp-mascot"><img src="assets/mascot-point.png" alt=""></div>
       <div class="ovp-title-wrap">
         <div class="ovp-title">ภาพรวมตัวชี้วัดทั้งหมด</div>
-        <div class="ovp-subtitle">แสดงรายละเอียดตัวชี้วัดประจำปีงบประมาณ 2569 · ${Q_LABEL[q]} (${PERIOD_LABEL[q]})</div>
+        <div class="ovp-subtitle">แสดงรายละเอียดตัวชี้วัดประจำปีงบประมาณ 2569 · ${Q_LABEL[q]} (${PERIOD_LABEL[q]})<br>${quarterCoverageText(q)}</div>
       </div>
       <div class="ovp-search"><input id="ovpSearchInput" type="text" placeholder="ค้นหา KPI ID หรือชื่อตัวชี้วัด..." value="${ovpState.search}" oninput="ovpSetSearch(this.value)"></div>
     </div>
@@ -1030,7 +1061,7 @@ function renderOverview() {
       <label>ไตรมาส
         <select onchange="ovpSetFilter('quarter', this.value)">
           <option value="q1" ${q === 'q1' ? 'selected' : ''}>Q1 (3 เดือน)</option>
-          <option value="q2" ${q === 'q2' ? 'selected' : ''}>Q2 (6 เดือน) — ปัจจุบัน</option>
+          <option value="q2" ${q === 'q2' ? 'selected' : ''}>Q2 (6 เดือน)</option>
           <option value="q3" ${q === 'q3' ? 'selected' : ''}>Q3 (9 เดือน)</option>
           <option value="q4" ${q === 'q4' ? 'selected' : ''}>Q4 (12 เดือน)</option>
         </select>

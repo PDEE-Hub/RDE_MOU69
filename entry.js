@@ -16,7 +16,7 @@ const entryState = {
 
 const ENTRY_STATUS_ICON = { not_started: '○', pending: '◐', confirmed: '✓', needs_review: '!' };
 const ENTRY_STATUS_TITLE = { not_started: 'ยังไม่กรอก', pending: 'รอยืนยัน', confirmed: 'ยืนยันแล้ว', needs_review: 'ต้องตรวจสอบ' };
-const ENTRY_KPI_TYPE_TH = { numeric: 'ตัวเลข', investment: 'ตัวเลข', plan: 'แผนการดำเนินงาน' };
+const ENTRY_KPI_TYPE_TH = { report:'ผลและข้อมูลประกอบ', numeric: 'ตัวเลข', investment: 'ตัวเลข', plan: 'แผนการดำเนินงาน' };
 
 function entrySetRole(role) {
   entryState.role = role;
@@ -26,7 +26,7 @@ function entrySetRole(role) {
 }
 function entrySelectKpi(id) {
   entryState.activeKpi = id;
-  entryState.activeChild = null;
+  entryState.activeChild = ENTRY_KPI_TYPE[id] === 'report' ? reportLeaves(id)[0]?.id || null : null;
   entryState.view = 'form';
   renderEntry();
 }
@@ -36,7 +36,7 @@ function entrySelectChild(id) {
 }
 function entrySetView(v) { entryState.view = v; renderEntry(); }
 
-function entryEsc(s) { return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function entryEsc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function entryThaiDate(iso) {
   if (!iso) return '—';
   try { return new Date(iso + 'T00:00:00').toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }); } catch (e) { return iso; }
@@ -64,7 +64,7 @@ function entryHeaderHtml() {
           <div class="entry-header-sub">เมษายน – มิถุนายน 2569 &nbsp;·&nbsp; สถานะ: <b>ทดสอบระบบ (UAT)</b></div>
         </div>
         <div class="entry-header-right">
-          <div class="entry-progress-badge">${count} / 3 <span>ยืนยันแล้ว</span></div>
+          <div class="entry-progress-badge">${count} / ${ENTRY_PILOT_IDS.length} <span>ยืนยันแล้ว</span></div>
           <div class="entry-role-toggle">
             <button class="${entryState.role === 'owner' ? 'active' : ''}" onclick="entrySetRole('owner')">ผู้รับผิดชอบ KPI</button>
             <button class="${entryState.role === 'admin' ? 'active' : ''}" onclick="entrySetRole('admin')">ผู้ดูแลระบบ</button>
@@ -151,7 +151,7 @@ function entryIssueBlockHtml(kpiId, monthKey, idPrefix) {
     </div>
   </div>`;
 }
-function entryOnIssueInput(kpiId, monthKey, field, val) { setIssue(kpiId, monthKey, { [field]: val }); }
+function entryOnIssueInput(kpiId, monthKey, field, val) { setIssue(kpiId, monthKey, { [field]: val }); setEntry(kpiId,{status:'draft'}); }
 
 // ═══════════════════════════════════════════════════════════
 // NUMERIC FORM — KPI 2.4 only (brief §3/§4/§5; unchanged by v1.2)
@@ -185,7 +185,11 @@ function entryNumericFormHtml(kpiId) {
       <div class="entry-meta-line">หน่วยหลัก (Master): <b>${MOU_DATA.kpis[kpiId].unit || '—'}</b> &nbsp;·&nbsp; น้ำหนัก ${MOU_DATA.kpis[kpiId].weight}%</div>
       ${unitSelector}
       ${rows}
+      <div class="entry-field-row col"><label>สรุปผลการดำเนินงาน Q3</label>
+        <textarea class="entry-input" rows="3" oninput="setEntry('${kpiId}', {summary_text:this.value,status:'draft'})" placeholder="อธิบายผลการดำเนินงาน สาเหตุ หรือประเด็นสำคัญ">${entryEsc(entry.summary_text || '')}</textarea>
+      </div>
       ${entryIssueBlockHtml(kpiId, 'q3', 'iss_' + kpiId)}
+      <div class="entry-note-small">เมื่อยืนยันบันทึก ระบบจะส่งผลสะสม คะแนน และข้อความชุดเดียวกันไปยังหน้ารายละเอียด ภาพรวม และ Home · การแก้ไขร่างจะยังไม่แทนผลที่ยืนยันครั้งล่าสุด</div>
       <div class="entry-btn-row">
         <button class="entry-btn ghost" onclick="entrySaveDraft('${kpiId}')">บันทึกร่าง</button>
         <button class="entry-btn secondary" onclick="entryValidate('${kpiId}')">ตรวจสอบข้อมูล</button>
@@ -217,7 +221,9 @@ function entryValidate(kpiId) {
 function entryConfirmNumeric(kpiId) {
   const r = confirmNumeric(kpiId, 'ผู้รับผิดชอบ KPI (UAT)');
   if (!r.ok) { entryValidate(kpiId); entryToast('ยังยืนยันไม่ได้ — ตรวจสอบข้อมูลอีกครั้ง'); return; }
-  entryToast('ยืนยันบันทึก Q3 เรียบร้อย — ข้อมูลถูกส่งไปยัง Detail / ภาพรวม / Home แล้ว');
+  entryToast('ยืนยันบันทึก Q3 แล้ว — ผล คะแนน และข้อความเชื่อมไปยังรายละเอียด ภาพรวม และ Home');
+  if (typeof renderDetail === 'function') renderDetail();
+  if (typeof renderOverview === 'function') renderOverview();
   renderEntry();
   if (typeof renderHome === 'function') renderHome();
 }
@@ -593,6 +599,7 @@ function entrySubmitPlan(kpiId, monthKey) {
 // CENTER + RIGHT dispatch
 // ═══════════════════════════════════════════════════════════
 function entryCenterHtml() {
+  if(ENTRY_KPI_TYPE[entryState.activeKpi]==='report') return reportFormHtml(reportActiveId());
   if (entryState.activeKpi === '1.1') return entryInvestmentFormHtml();
   if (entryState.activeKpi === '2.7') {
     if (!entryState.activeChild) entryState.activeChild = '2.7.1';
@@ -602,6 +609,7 @@ function entryCenterHtml() {
 }
 
 function entryPreviewHtml() {
+  if(ENTRY_KPI_TYPE[entryState.activeKpi]==='report') return reportPreviewHtml(reportActiveId());
   if (entryState.activeKpi === '1.1') return entryInvestmentPreviewHtml();
   const kpiId = entryState.activeKpi === '2.7' ? (entryState.activeChild || '2.7.1') : '2.4';
   const type = ENTRY_KPI_TYPE[kpiId];

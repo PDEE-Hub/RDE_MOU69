@@ -3,7 +3,7 @@
 // Everything below is read from MOU_DATA / engine.js at runtime; nothing is re-derived
 // or invented beyond what §3/§5 explicitly authorize (SUM / LAST_VALUE — never assumed).
 
-const ENTRY_PILOT_IDS = ['2.4', '1.1', '2.7'];
+const ENTRY_PILOT_IDS = ['1.1','1.2','1.3','1.4','2.1','2.2','2.3','2.4','2.5','2.6','2.7','2.8'];
 
 const ENTRY_Q3_MONTHS = [
   { key: 'm7', label: 'เมษายน 2569' },
@@ -27,6 +27,7 @@ const ENTRY_FISCAL_QUARTER_LABEL = { q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4' };
 // '1.1' is 'investment' — a distinct entry workflow (annual framework + shared raw plan/actual,
 // brief v1.2 §B) though it still scores as an ordinary numeric/linear KPI in engine.js.
 const ENTRY_KPI_TYPE = {
+  '1.2':'report','1.3':'report','1.4':'report','2.1':'report','2.1.1':'report','2.1.2':'report','2.1.3':'report','2.2':'report','2.3':'report','2.5':'report','2.5.1':'report','2.5.2':'report','2.6':'report','2.8':'report','2.8.1':'report','2.8.2':'report','2.8.3':'report',
   '2.4': 'numeric',
   '1.1': 'investment', '1.1.1': 'numeric', '1.1.2': 'numeric',
   '2.7': 'plan', '2.7.1': 'plan', '2.7.2': 'plan', '2.7.3': 'plan',
