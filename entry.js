@@ -50,6 +50,51 @@ function entryToast(msg) {
   window.__entryToastTimer = setTimeout(() => { el.style.display = 'none'; }, 2600);
 }
 
+// ── UAT Data transfer UI ─────────────────────────────────
+function entryExportUatData() {
+  const r = uatExportData();
+  if (!r.ok) { entryToast('ส่งออกข้อมูลไม่สำเร็จ: ' + r.error); return; }
+  entryToast('ส่งออก UAT Data แล้ว — สำรอง 2 ชุดข้อมูลเรียบร้อย');
+}
+
+function entryOpenImportUat() {
+  const input = document.getElementById('entryUatImportFile');
+  if (input) { input.value = ''; input.click(); }
+}
+
+function entryHandleImportUat(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let payload;
+    try { payload = JSON.parse(reader.result); }
+    catch (e) { entryToast('ไฟล์ไม่ใช่ JSON ที่ถูกต้อง'); return; }
+
+    const v = uatValidateImportPayload(payload);
+    if (!v.ok) { entryToast(v.issues[0]); return; }
+
+    const keySummary = v.keys.map(key => {
+      const value = payload.keys[key];
+      return `${key}: ${uatCountRecords(value)} รายการ`;
+    }).join('\n');
+
+    entryConfirmModal(
+      `ไฟล์: ${file.name}\n${keySummary}\n\nระบบจะสำรองข้อมูลในเครื่องนี้ก่อน Import และจะ Merge ข้อมูลใหม่เข้ากับข้อมูลเดิม โดยไม่ลบข้อมูลของ KPI อื่น\n\nยืนยันนำเข้าข้อมูลหรือไม่?`,
+      () => {
+        const r = uatImportData(payload);
+        if (!r.ok) { entryToast('นำเข้าไม่สำเร็จ: ' + (r.issues || [r.error])[0]); return; }
+        entryToast(`นำเข้า UAT Data สำเร็จ — ${r.stats.importedKeys.length} ชุดข้อมูล และสำรองข้อมูลเดิมแล้ว`);
+        renderEntry();
+        if (typeof renderHome === 'function') renderHome();
+        if (typeof renderOverview === 'function') renderOverview();
+        if (typeof renderDetail === 'function') renderDetail();
+      }
+    );
+  };
+  reader.onerror = () => entryToast('ไม่สามารถอ่านไฟล์ได้');
+  reader.readAsText(file, 'utf-8');
+}
+
 // ═══════════════════════════════════════════════════════════
 // HEADER / LEFT RAIL
 // ═══════════════════════════════════════════════════════════
@@ -65,6 +110,11 @@ function entryHeaderHtml() {
         </div>
         <div class="entry-header-right">
           <div class="entry-progress-badge">${count} / ${ENTRY_PILOT_IDS.length} <span>ยืนยันแล้ว</span></div>
+          <div class="entry-data-tools" title="สำรองและถ่ายโอนข้อมูล UAT ระหว่างเครื่อง">
+            <button class="entry-data-btn" type="button" onclick="entryExportUatData()">ส่งออก UAT Data</button>
+            <button class="entry-data-btn" type="button" onclick="entryOpenImportUat()">นำเข้า UAT Data</button>
+            <input id="entryUatImportFile" type="file" accept=".json,application/json" style="display:none" onchange="entryHandleImportUat(this.files && this.files[0])">
+          </div>
           <div class="entry-role-toggle">
             <button class="${entryState.role === 'owner' ? 'active' : ''}" onclick="entrySetRole('owner')">ผู้รับผิดชอบ KPI</button>
             <button class="${entryState.role === 'admin' ? 'active' : ''}" onclick="entrySetRole('admin')">ผู้ดูแลระบบ</button>

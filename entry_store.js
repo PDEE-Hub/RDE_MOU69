@@ -758,3 +758,153 @@ function resetQ3UatData() {
   saveUatStore(store);
   Object.keys(MOU_DATA.kpis).forEach(id => ovrClearQuarter(id, 'q3'));
 }
+
+
+// ═══════════════════════════════════════════════════════════
+// UAT EXPORT / IMPORT — localStorage bridge for multi-device UAT
+// Keeps the existing data model intact. Only these UAT stores are transported:
+//   mou69_uat_q3_v1 and mou69_v1_overrides
+// Import is MERGE-by-key; unrelated existing records are preserved.
+// Before every import, the current state is snapshotted in a rotating local backup.
+// ═══════════════════════════════════════════════════════════
+const UAT_TRANSFER_VERSION = '1.0';
+const UAT_TRANSFER_KEYS = ['mou69_uat_q3_v1', 'mou69_v1_overrides'];
+const UAT_BACKUP_KEY = 'mou69_uat_import_backups_v1';
+const UAT_BACKUP_LIMIT = 5;
+
+function uatTransferReadKey(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? null : JSON.parse(raw);
+  } catch (e) {
+    throw new Error('ไม่สามารถอ่านข้อมูล ' + key + ' ได้');
+  }
+}
+
+function uatTransferWriteKey(key, value) {
+  try {
+    if (value === null || value === undefined) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    throw new Error('ไม่สามารถบันทึกข้อมูล ' + key + ' ได้');
+  }
+}
+
+function uatTransferSnapshot() {
+  const snapshot = {
+    exportedAt: new Date().toISOString(),
+    keys: {}
+  };
+  UAT_TRANSFER_KEYS.forEach(key => { snapshot.keys[key] = uatTransferReadKey(key); });
+  return snapshot;
+}
+
+function uatSaveImportBackup() {
+  const current = uatTransferSnapshot();
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem(UAT_BACKUP_KEY) || '[]'); } catch (e) { history = []; }
+  history.unshift(current);
+  history = history.slice(0, UAT_BACKUP_LIMIT);
+  try { localStorage.setItem(UAT_BACKUP_KEY, JSON.stringify(history)); } catch (e) {}
+  return current;
+}
+
+// Objects are merged recursively so different KPI IDs survive an import.
+// Arrays are intentionally replaced as one logical record (e.g. version histories),
+// while object properties at KPI/month level are merged.
+function uatMergeData(existing, incoming) {
+  if (existing === null || existing === undefined) return incoming;
+  if (incoming === null || incoming === undefined) return existing;
+  if (Array.isArray(existing) || Array.isArray(incoming)) return incoming;
+  if (typeof existing === 'object' && typeof incoming === 'object') {
+    const out = Object.assign({}, existing);
+    Object.keys(incoming).forEach(k => {
+      out[k] = Object.prototype.hasOwnProperty.call(out, k)
+        ? uatMergeData(out[k], incoming[k])
+        : incoming[k];
+    });
+    return out;
+  }
+  return incoming;
+}
+
+function uatTransferExportPayload() {
+  const payload = {
+    format: 'PAT-PHET-MOU69-UAT',
+    version: UAT_TRANSFER_VERSION,
+    exportedAt: new Date().toISOString(),
+    source: 'PAT-PHET | MOU 69 Dashboard — UAT Prototype',
+    keys: {}
+  };
+  UAT_TRANSFER_KEYS.forEach(key => { payload.keys[key] = uatTransferReadKey(key); });
+  return payload;
+}
+
+function uatDownloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function uatExportData() {
+  try {
+    const payload = uatTransferExportPayload();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    uatDownloadJson(`PAT_MOU69_UAT_Data_${stamp}.json`, payload);
+    return { ok: true, payload };
+  } catch (e) {
+    return { ok: false, error: e.message || 'Export ไม่สำเร็จ' };
+  }
+}
+
+function uatValidateImportPayload(payload) {
+  if (!payload || typeof payload !== 'object') return { ok: false, issues: ['ไฟล์ไม่ใช่ JSON object'] };
+  if (payload.format !== 'PAT-PHET-MOU69-UAT') return { ok: false, issues: ['ไม่ใช่ไฟล์ UAT Data ของ PAT-PHET MOU 69'] };
+  if (!payload.keys || typeof payload.keys !== 'object') return { ok: false, issues: ['ไม่พบชุดข้อมูลที่ต้องนำเข้า'] };
+  const found = UAT_TRANSFER_KEYS.filter(k => Object.prototype.hasOwnProperty.call(payload.keys, k));
+  if (!found.length) return { ok: false, issues: ['ไฟล์ไม่มีข้อมูล UAT ที่รองรับ'] };
+  return { ok: true, keys: found };
+}
+
+function uatCountRecords(value) {
+  if (!value || typeof value !== 'object') return 0;
+  if (Array.isArray(value)) return value.length;
+  return Object.keys(value).length;
+}
+
+function uatImportData(payload) {
+  const validation = uatValidateImportPayload(payload);
+  if (!validation.ok) return validation;
+
+  try {
+    const backup = uatSaveImportBackup();
+    const stats = { importedKeys: [], changed: 0, preserved: 0, backupAt: backup.exportedAt };
+
+    validation.keys.forEach(key => {
+      const incoming = payload.keys[key];
+      const existing = uatTransferReadKey(key);
+
+      if (existing && incoming && typeof existing === 'object' && typeof incoming === 'object' &&
+          !Array.isArray(existing) && !Array.isArray(incoming)) {
+        const merged = uatMergeData(existing, incoming);
+        uatTransferWriteKey(key, merged);
+        stats.changed += uatCountRecords(incoming);
+        stats.preserved += Math.max(0, uatCountRecords(existing) - uatCountRecords(incoming));
+      } else {
+        uatTransferWriteKey(key, incoming);
+        stats.changed += uatCountRecords(incoming);
+      }
+      stats.importedKeys.push(key);
+    });
+
+    return { ok: true, stats };
+  } catch (e) {
+    return { ok: false, issues: [e.message || 'Import ไม่สำเร็จ'] };
+  }
+}
