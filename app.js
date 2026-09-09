@@ -237,13 +237,15 @@ function renderHome() {
             const barPct = s.level !== null ? s.level / 5 * 100 : 0;
             return `
             <div class="hl-kpi" onclick="openQuickDetail('${kpi.id}','${activeQ}')" style="cursor:pointer">
-              <div class="hl-kpi-id">${kpi.id} · น้ำหนัก ${kpi.weight}</div>
-              <div class="hl-kpi-label">${HOME_HIGHLIGHT_LABELS[kpi.id]}</div>
-              <div class="hl-kpi-scores" style="color:${homeScoreColor(s.level)}">${s.level !== null ? s.level.toFixed(4) : '—'}<span class="fc" style="color:${homeScoreColor(fc.level)}">${fc.level !== null ? 'คาดการณ์สิ้นปี ' + fc.level.toFixed(4) : 'คาดการณ์สิ้นปี —'}</span></div>
+              <div class="hl-kpi-label"><span class="hl-kpi-id">${kpi.id}</span> ${HOME_HIGHLIGHT_LABELS[kpi.id]} <span class="hl-kpi-weight">น้ำหนัก ${kpi.weight}</span></div>
               <div class="hl-kpi-meta">ผล ${ovpFmt(s.rawValue)} ${s.rawValue != null ? kpi.unit || '' : ''} · ${Q_LABEL[activeQ]}</div>
               ${reportSummaryHtml(kpi.id,activeQ)}
               <div class="hl-kpi-bar"><div class="hl-kpi-bar-fill" style="width:${barPct}%;background:${homeScoreColor(s.level)}"></div></div>
               <div class="hl-kpi-meta"><span>${kpi.target != null ? 'Target: ' + kpi.target + ' ' + (kpi.unit || '') : 'คะแนนเป้าหมาย: ' + (kpi.targetScore ?? '—') + ' / 5'}</span></div>
+              <div class="hl-kpi-scores">
+                <div class="hl-kpi-score-row"><span class="hl-kpi-score-label">คะแนนปัจจุบัน</span><span class="hl-kpi-score-value" style="color:${homeScoreColor(s.level)}">${s.level !== null ? s.level.toFixed(4) : '—'}</span></div>
+                <div class="hl-kpi-score-row"><span class="hl-kpi-score-label">คาดการณ์สิ้นปี</span><span class="hl-kpi-score-value" style="color:${homeScoreColor(fc.level)}">${fc.level !== null ? fc.level.toFixed(4) : '—'}</span></div>
+              </div>
             </div>`;
           }).join('')}
           <button class="hl-kpi-more" onclick="goToOverview()">ดูตัวชี้วัดทั้งหมด →</button>
