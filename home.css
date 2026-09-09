@@ -431,3 +431,11 @@ body:has(#page-home.active) .tab-btn { padding: 8px 12px; }
 #page-home .executive-counts>span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 #page-home .executive-counts i { width: 9px; height: 9px; border-radius: 50%; }
 #page-home .bottom-row>div:first-child { max-height: none; overflow: visible; }
+
+/* Home highlight cards: KPI identity first, comparable score rows. */
+#page-home .hl-kpi-label .hl-kpi-id { font: inherit; color: inherit; }
+#page-home .hl-kpi-weight { font-size: 12px; font-weight: 400; color: var(--home-text-3); white-space: nowrap; }
+#page-home .hl-kpi-scores { text-shadow: none; }
+#page-home .hl-kpi-score-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: baseline; }
+#page-home .hl-kpi-score-label { font-size: 12px; font-weight: 400; color: var(--home-text-3); }
+#page-home .hl-kpi-score-value { font-size: 15px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
