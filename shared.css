@@ -452,3 +452,21 @@ body:has(#page-detail.active) .tab-btn.active { background: #e1e9f4; color: #2d5
   .entry-header-right { flex-wrap:wrap; justify-content:flex-end; }
   .entry-data-tools { order:3; width:100%; justify-content:flex-end; }
 }
+
+/* Overview: compact executive scan table only. */
+#page-overview .ovp-table { table-layout: fixed; min-width: 1955px; }
+#page-overview .ovp-table tbody tr { height: 72px; }
+#page-overview .ovp-table td { overflow-wrap: anywhere; }
+#page-overview .ovp-table .ovp-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#page-overview .ovp-table th { font-size: 12px; }
+#page-overview .ovp-name-cell { font-weight: 600; }
+#page-overview .ovp-row-sub .ovp-name-cell { font-weight: 400; }
+#page-overview .ovp-indent { flex-shrink: 0; }
+#page-overview .ovp-caret { font-size: 16px; }
+#page-overview .ovp-narrative { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: var(--text2); text-align: left; cursor: pointer; }
+#page-overview .ovp-narrative span, #page-overview .ovp-status-txt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.5; max-height: 3em; overflow-wrap: anywhere; }
+#page-overview .ovp-narrative:hover { text-decoration: underline; }
+#page-overview .ovp-status-cell { display: flex; align-items: center; gap: 4px; }
+#page-overview .ovp-alert-flag { padding: 0; border: 0; background: none; flex-shrink: 0; }
+#page-overview .ovp-detail-btn { font-size: 22px; line-height: 1; }
+#quickDetailOverlay .ovp-narrative-modal .ovp-narrative-full { white-space: pre-wrap; overflow-wrap: anywhere; }
