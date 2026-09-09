@@ -953,34 +953,44 @@ function ovpActualCell(kpi, s) {
   return ['milestone_pct','milestone_manual'].includes(kpi.scoringMethod) ? `${(Number(s.rawValue)*100).toFixed(2)}%` : entryEsc(String(ovpFmt(s.rawValue)));
 }
 
+function ovpNarrativeCell(kpiId, q, field) {
+  const value = reportText(kpiId, q, field);
+  return value ? `<button class="ovp-narrative" onclick="ovpOpenNarrative('${kpiId}','${q}','${field}')" aria-label="อ่านข้อความฉบับเต็ม"><span>${entryEsc(value)}</span></button>` : '<span class="ovp-empty-cell">—</span>';
+}
+function ovpOpenNarrative(kpiId, q, field) {
+  const labels = {summary_text:'สรุปผล', obstacle_text:'ปัญหา/อุปสรรค', solution_text:'การดำเนินการต่อ'};
+  if (!labels[field]) return;
+  const overlay = document.getElementById('quickDetailOverlay');
+  overlay.innerHTML = `<div class="qd-modal ovp-narrative-modal" role="dialog" aria-modal="true" aria-labelledby="ovpNarrativeTitle"><div class="qd-head"><b id="ovpNarrativeTitle">${entryEsc(kpiId + ' ' + MOU_DATA.kpis[kpiId].label)} · ${labels[field]}</b><button class="qd-close" onclick="closeQuickDetail()" aria-label="ปิด">×</button></div><div class="qd-body"><div class="ovp-narrative-full">${entryEsc(reportText(kpiId,q,field))}</div></div></div>`;
+  overlay.classList.add('open');
+  overlay.querySelector('.qd-close').focus();
+}
 function ovpRowHtml(kpi, depth, q) {
   const kids = ovpChildren(kpi.id);
   const hasKids = kids.length > 0;
   const expanded = ovpEffectiveExpanded(kpi);
   const s = ovpScoreOf(kpi, q);
-  const owner = (kpi.ownerMain && kpi.ownerMain.length) ? kpi.ownerMain.join(', ') : '—';
   const status = ovpStatusOf(kpi, q);
   const alert = ovpHasAlert(kpi.id);
   const rowClass = depth === 0 ? 'ovp-row-main' : 'ovp-row-sub';
-  const indent = depth > 0 ? `<span class="ovp-indent" style="width:${depth * 16}px"></span>` : '';
+  const indent = depth > 0 ? `<span class="ovp-indent" style="width:${depth * 12}px"></span>` : '';
   const toggleCell = hasKids
-    ? `<button class="ovp-caret ${expanded ? 'open' : ''}" onclick="ovpToggle('${kpi.id}')" title="ขยาย/ย่อตัวชี้วัดย่อย">▶</button>`
-    : `<span class="ovp-caret spacer">▶</span>`;
+    ? `<button class="ovp-caret" onclick="ovpToggle('${kpi.id}')" aria-expanded="${expanded}" aria-label="${expanded ? 'ย่อ' : 'ขยาย'}ตัวชี้วัด ${kpi.id}">${expanded ? '▾' : '▸'}</button>`
+    : `<span class="ovp-caret spacer" aria-hidden="true">▸</span>`;
   return `<tr class="${rowClass}">
-    <td><div class="ovp-id-cell">${indent}<b>${kpi.id}</b></div></td>
-    <td class="ovp-name-cell">${kpi.label}${reportSummaryHtml(kpi.id,q)}</td>
-    <td>${kpi.groupLabel || '—'}</td>
-    <td>${kpi.weight ?? '—'}</td>
-    <td>${kpi.unit || '—'}</td>
-    <td>${ovpActualCell(kpi, s)}</td>
-    <td>${ovpBadge(s.level)}</td>
-    <td>${ovpBadge(ovpForecastScore(kpi.id))}</td>
-    <td>${ovpBadge(kpi.targetScore)}</td>
-    <td class="ovp-owner-txt">${owner}</td>
-    <td>${status ? `<span class="ovp-status-txt">${status}</span>` : '<span class="ovp-empty-cell">—</span>'}</td>
-    <td><button class="ovp-detail-btn" onclick="ovpDetailClick('${kpi.id}')">ดูรายละเอียด</button></td>
-    <td>${alert ? `<span class="ovp-alert-flag" onclick="goToActionPlan()" title="มีประเด็นที่ต้องติดตาม">🔔</span>` : '<span class="ovp-alert-none">—</span>'}</td>
-    <td>${toggleCell}</td>
+    <td><div class="ovp-id-cell">${indent}${toggleCell}<b>${kpi.id}</b></div></td>
+    <td class="ovp-name-cell">${entryEsc(kpi.label)}</td>
+    <td class="ovp-num">${kpi.weight ?? '—'}</td>
+    <td>${entryEsc(kpi.unit || '—')}</td>
+    <td class="ovp-num">${ovpActualCell(kpi, s)}</td>
+    <td class="ovp-num">${ovpBadge(s.level)}</td>
+    <td class="ovp-num">${ovpBadge(ovpForecastScore(kpi.id))}</td>
+    <td class="ovp-num">${ovpBadge(kpi.targetScore)}</td>
+    <td>${ovpNarrativeCell(kpi.id,q,'summary_text')}</td>
+    <td>${ovpNarrativeCell(kpi.id,q,'obstacle_text')}</td>
+    <td>${ovpNarrativeCell(kpi.id,q,'solution_text')}</td>
+    <td><div class="ovp-status-cell">${status ? `<span class="ovp-status-txt" title="${entryEsc(status)}">${entryEsc(status)}</span>` : '<span class="ovp-empty-cell">—</span>'}${alert ? `<button class="ovp-alert-flag" onclick="goToActionPlan()" title="มีประเด็นที่ต้องติดตาม" aria-label="ดูแจ้งเตือน ${kpi.id}">🔔</button>` : ''}</div></td>
+    <td><button class="ovp-detail-btn" onclick="ovpDetailClick('${kpi.id}')" aria-label="ดูรายละเอียด ${kpi.id}" title="ดูรายละเอียด">›</button></td>
   </tr>`;
 }
 
@@ -1089,12 +1099,13 @@ function renderOverview() {
     </div>
 
     <div class="ovp-table-wrap"><table class="ovp-table">
+      <colgroup>${[110,300,70,100,110,95,95,95,220,220,220,150,70].map(w=>`<col style="width:${w}px">`).join('')}</colgroup>
       <thead><tr>
-        <th>KPI ID</th><th>ชื่อตัวชี้วัด</th><th>กลุ่มตัวชี้วัด</th><th>น้ำหนัก</th><th>หน่วยวัด</th>
-        <th>ผลการดำเนินงาน</th><th>คะแนน</th><th>คาดการณ์</th><th>Target</th>
-        <th>ผู้บริหาร</th><th>สถานะ</th><th>ดูรายละเอียด</th><th>แจ้งเตือน</th><th>ดูตัวชี้วัดย่อย</th>
+        <th>KPI</th><th>ตัวชี้วัด</th><th class="ovp-num">น้ำหนัก</th><th>หน่วยวัด</th>
+        <th class="ovp-num">ผล</th><th class="ovp-num">คะแนน</th><th class="ovp-num">คาดการณ์</th><th class="ovp-num">Target</th>
+        <th>สรุปผล</th><th>ปัญหา/อุปสรรค</th><th>การดำเนินการต่อ</th><th>สถานะ</th><th>รายละเอียด</th>
       </tr></thead>
-      <tbody>${rows.length ? rows.join('') : '<tr><td colspan="14" class="empty-note">ไม่พบตัวชี้วัดที่ตรงกับตัวกรอง</td></tr>'}</tbody>
+      <tbody>${rows.length ? rows.join('') : '<tr><td colspan="13" class="empty-note">ไม่พบตัวชี้วัดที่ตรงกับตัวกรอง</td></tr>'}</tbody>
     </table></div>
   `;
 }
