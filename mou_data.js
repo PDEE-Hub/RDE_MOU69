@@ -179,9 +179,9 @@ const MOU_DATA = {
       "targetScore": 5,
       "isLeaf": true,
       "kpiType": "NUMERIC",
-      "scoringMethod": "annual_only",
-      "needsConfirmation": true,
-      "confirmationNote": "พบจากข้อมูลจริง: Q1/Q2/Q3 คะแนนคงที่ =1 ทั้งที่ผลสะสมต่างกันมาก (1.6M/3.06M/4.1M Ton เทียบเกณฑ์ ~6.01M Ton) — ตัวชี้วัดนี้ดูเหมือนจะตัดสิน คะแนนจริงเฉพาะ Q4 (ผลสิ้นปี) เท่านั้น ไตรมาสอื่นเป็นค่า placeholder V1 จึงใช้ Level ที่ Admin ยืนยัน/ค่าจาก Excel ตรงๆ ไม่ interpolate จนกว่าจะถึง Q4 — โปรดยืนยันกับผู้รับผิดชอบตัวชี้วัดนี้"
+      "scoringMethod": "linear",
+      "needsConfirmation": false,
+      "confirmationNote": "แก้ไข 2026-09: เดิมตั้งเป็น annual_only เพราะ Q1-Q3 คะแนนคงที่ =1 ทั้งที่ผลสะสมต่างกันมาก ทำให้สงสัยว่าตัวชี้วัดนี้ตัดสินคะแนนเฉพาะ Q4 -- ตรวจสอบกับ MOU69_Claude.xlsx / 1.Master Data แล้วพบว่าเป็น scoring-direction bug: threshold/higherIsBetter ที่นี่ถูกต้องอยู่แล้ว (lower-is-better) แต่ scoringMethod annual_only ทำให้ระบบข้าม interpolation ทุกไตรมาสยกเว้น Q4 และใช้ placeholder Level=1 แทน Master Data ยืนยันว่าตัวชี้วัดนี้ interpolate ทุกไตรมาสเหมือน KPI ตัวเลขทั่วไป (Q1/Q2/Q3 = Level 5 ทั้งหมด) จึงเปลี่ยนเป็น linear ให้ตรงกับพฤติกรรมจริง"
     },
     "2.1": {
       "id": "2.1",
@@ -966,12 +966,12 @@ const MOU_DATA = {
     "1.4": {
       "q1": {
         "actual": 1616470,
-        "score": 1,
+        "score": 5,
         "note": null
       },
       "q2": {
         "actual": 3060625,
-        "score": 1,
+        "score": 5,
         "note": null
       }
     },

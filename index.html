@@ -3,19 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PAT-PHET | MOU 69 Dashboard — UAT Prototype</title>
+<title>PAT-PHET | MOU 69 Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-
 <link rel="stylesheet" href="shared.css">
 <link rel="stylesheet" href="home.css">
 <link rel="stylesheet" href="reporting.css">
+<link rel="stylesheet" href="detail24.css">
 </head>
 <body>
 
-<div class="uat-banner">UAT Prototype — สำหรับทดสอบระบบเท่านั้น ข้อมูลในระบบนี้ไม่ถือเป็นผลการดำเนินงานอย่างเป็นทางการ</div>
 <header>
   <div class="logo"><span class="badge">PAT-PHET</span> MOU 69</div>
   <nav class="tabs">
@@ -25,7 +23,7 @@
     <button class="tab-btn" id="tabBtnEntry" onclick="switchTab('entry',this)">กรอกข้อมูล</button>
     <button class="tab-btn" id="tabBtnAlerts" onclick="switchTab('alerts',this)">แจ้งเตือน</button>
   </nav>
-  <div class="asof">ผลตั้งต้น Q1–Q2 · Q3 จากการกรอกและยืนยัน</div>
+  <div class="asof">ผลตั้งต้น Q1–Q3 · Q4 จากการกรอกและยืนยัน</div>
 </header>
 
 <main>
@@ -39,6 +37,7 @@
 <div id="quickDetailOverlay" onclick="if(event.target===this) closeQuickDetail()"></div>
 
 <script src="mou_data.js"></script>
+<script src="q3_baseline.js"></script>
 <script src="engine.js"></script>
 <script src="entry_config.js"></script>
 <script src="entry_store.js"></script>
@@ -48,5 +47,11 @@
 <script src="entry.js"></script>
 <script src="alerts.js"></script>
 <script src="all_kpis.js"></script>
+<script src="monthly_june.js"></script>
+<script src="numeric_detail.js"></script>
+<script src="detail_pattern.js"></script>
+<script src="api_config.js"></script>
+<script src="api_client.js"></script>
+<script src="remote_data_adapter.js"></script>
 </body>
 </html>

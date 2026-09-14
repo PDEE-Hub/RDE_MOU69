@@ -1,0 +1,18 @@
+const NUMERIC_DETAIL_IDS=['1.1.1','1.1.2','1.4','2.1','2.1.1','2.1.2','2.1.3','2.2','2.3','2.4','2.6'];
+function numericMonthlyChart(id,q){
+ const ids=id==='2.1'?['2.1.1','2.1.2','2.1.3']:[id],limit=Math.min(9,({q1:3,q2:6,q3:9,q4:9})[q]);
+ const colors=['#41a570','#6586ae','#c49436'];
+ const series=ids.map((key,i)=>({key,color:colors[i],data:DETAIL_MONTHLY_JUNE[key],values:(DETAIL_MONTHLY_JUNE[key]?.values||Array(9).fill(null)).map((v,j)=>j<limit?v:null)}));
+ const vals=series.flatMap(s=>s.values).filter(v=>typeof v==='number');
+ const lo=Math.min(0,...vals),hi=Math.max(1,...vals)*1.12,px=i=>58+i*75,py=v=>175-(v-lo)/(hi-lo)*140;
+ const paths=series.map(s=>{let connected=false,d='';s.values.forEach((v,i)=>{if(typeof v!=='number'){connected=false;return;}d+=`${connected?'L':'M'}${px(i)},${py(v)} `;connected=true;});return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="3"/>${s.values.map((v,i)=>typeof v==='number'?`<circle cx="${px(i)}" cy="${py(v)}" r="4" fill="${s.color}"><title>${DTL_MONTH_LABEL[DTL_MONTH_KEYS[i]]}: ${ovpFmt(v)}</title></circle>`:'').join('')}`;}).join('');
+ return `<div class="fp-month-legend">${series.map(s=>`<span style="color:${s.color}">${id==='2.1'?entryEsc(MOU_DATA.kpis[s.key].label):entryEsc(s.data?.label||'-')}</span>`).join(' · ')} · ${entryEsc(MOU_DATA.kpis[id].unit||'')}</div>${vals.length?`<svg class="fp-score-chart" viewBox="0 0 720 212" role="img" aria-label="แนวโน้มผลการดำเนินงานรายเดือน">${[0,1,2,3,4].map(i=>{const v=lo+(hi-lo)*i/4;return `<line x1="58" x2="660" y1="${py(v)}" y2="${py(v)}" stroke="#e7edf0"/><text x="50" y="${py(v)+4}" text-anchor="end">${ovpFmt(v)}</text>`}).join('')}${paths}${DTL_MONTH_KEYS.slice(0,9).map((mk,i)=>`<text x="${px(i)}" y="201" text-anchor="middle">${DTL_MONTH_LABEL[mk]}</text>`).join('')}</svg>`:'<p class="fp-month-empty">-</p>'}<details><summary>ดูตัวเลขรายเดือน</summary><div class="fp24-table-scroll"><table class="dtl-qtable"><thead><tr><th>รายการ</th>${DTL_MONTH_KEYS.slice(0,9).map(m=>`<th>${DTL_MONTH_LABEL[m]}</th>`).join('')}</tr></thead><tbody>${series.map(s=>`<tr><td>${entryEsc(id==='2.1'?MOU_DATA.kpis[s.key].label:s.data?.label||'-')}</td>${s.values.map(v=>`<td>${typeof v==='number'?ovpFmt(v):'-'}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details><p class="fp24-footnote">ข้อมูลถึง มิ.ย. 2569${vals.length?' · MOU69_Claude / ผลรายเดือน':' · ต้นทางไม่มีข้อมูลรายเดือน'}</p>`;
+}
+function numericProgress(id,q){
+ if(id==='2.1')return ['2.1.1','2.1.2','2.1.3'].map(key=>`<div class="fp-progress-part"><h3>${entryEsc(MOU_DATA.kpis[key].label)}</h3>${numericProgress(key,q)}</div>`).join('');
+ const k=getEffectiveKpi(id),v=reportValue(id,q),target=k.thresholds?.[4],valid=typeof v==='number'&&typeof target==='number'&&target>0;
+ const pct=valid?v/target*100:null;
+ const lower=k.higherIsBetter===false;
+ const tone=!valid?'#cbd2d8':lower?(v<=target?'#41a570':'#ea4024'):(v>=target?'#41a570':'#849eb7');
+ return `<div class="fp24-card-heading"><span>${lower?'สัดส่วนผลเทียบเพดานสิ้นปี':'ผลเทียบเกณฑ์ระดับ 5'}</span><b style="color:${tone}">${pct===null?'-':pct.toFixed(1)+'%'}</b></div><div class="fp24-track"><div style="width:${pct===null?0:Math.max(0,Math.min(100,pct))}%;background:${tone}"></div></div><div class="fp24-scale"><span>${valid?ovpFmt(v):'-'} ${entryEsc(k.unit||'')}</span><span>${typeof target==='number'?ovpFmt(target):'-'} (ระดับ 5)</span></div><p class="fp24-footnote">${lower?'ค่ายิ่งต่ำยิ่งดี · แถบแสดงสัดส่วนเทียบเพดาน ไม่ใช่ร้อยละความสำเร็จ':id.startsWith('1.1')?'ใช้ผลร้อยละของตัวชี้วัด ณ สิ้นไตรมาสเทียบเกณฑ์ทั้งปี':'ใช้ผล ณ สิ้นไตรมาสเทียบเกณฑ์ทั้งปี'}${id==='2.2'?' · ผลสะสมในระบบยังไม่สอดคล้องกับข้อความรายงาน ต้องตรวจสอบยอดต้นทาง':''}</p>`;
+}

@@ -99,6 +99,10 @@ function setEntry(kpiId, patch) {
 }
 
 // ── Numeric: monthly input, quarter/cumulative aggregation (brief §3/§4/§5 — KPI 2.4 only) ──
+// NOTE: still hardcoded to treat Q2 as "prior" because the entry form (entry.js/all_kpis.js)
+// still targets Q3 as the quarter being entered — see the Q4-entry findings reported alongside
+// this change. Once the entry form is retargeted to Q4, this must become q3 -> q2 -> q1, not
+// q2 -> q1, or a Q4 edit would double-count Q3. Left untouched this round on purpose.
 function priorCumulative(kpiId) {
   const q2 = MOU_DATA.quarterly[kpiId] && MOU_DATA.quarterly[kpiId].q2;
   if (q2 && q2.actual !== null && q2.actual !== undefined) return q2.actual;

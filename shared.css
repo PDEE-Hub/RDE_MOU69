@@ -10,7 +10,6 @@ header { background: var(--pagebg); border-bottom: none; box-shadow: none; paddi
 .tab-btn:hover { background: #dbe5ef; }
 .tab-btn.active { background: var(--nav-active); color: #fff; font-weight: 700; }
 .asof { margin-left: auto; color: var(--text3); font-size: 12px; }
-.uat-banner { background: #fff8e1; border-bottom: 1px solid #e8d488; color: #8a6d1a; font-size: 11px; text-align: center; padding: 4px 12px; line-height: 1.5; }
 main { max-width: 1720px; margin: 0 auto; padding: 24px 28px 56px; }
 .page { display: none; }
 .page.active { display: block; }
@@ -43,6 +42,9 @@ main { max-width: 1720px; margin: 0 auto; padding: 24px 28px 56px; }
 .ovp-quickchips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .ovp-chip { border: 1.5px solid var(--border); background: #fff; border-radius: 20px; padding: 7px 16px; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--text2); }
 .ovp-chip b { font-size: 13px; font-weight: 800; }
+/* Same level-color dot convention as the Home legend (<i style="background:LV_COLORS[n]">) --
+   the exact colors already used by badges/heat map elsewhere, not a new palette. */
+.ovp-chip-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
 .ovp-chip.active { border-color: var(--text); color: var(--text); background: #f2efe8; }
 .ovp-chip.lv1 b { color: #8B0000; }
 .ovp-chip.lv2 b { color: #c96a1f; }
@@ -54,27 +56,72 @@ main { max-width: 1720px; margin: 0 auto; padding: 24px 28px 56px; }
 .ovp-filterbar label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text2); font-weight: 600; }
 .ovp-filterbar select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 12.5px; background: #fff; color: var(--text); }
 .ovp-table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
-.ovp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 1280px; }
-.ovp-table thead th { text-align: left; padding: 10px 10px; background: #f2efe8; border-bottom: 2px solid var(--border); white-space: nowrap; font-size: 11px; color: var(--text2); font-weight: 700; }
+.ovp-table { border-collapse: collapse; font-size: 12.5px; width: 1560px; table-layout: fixed; }
+/* Every header cell is centered regardless of its body alignment (KPI/name/narrative body stay
+   left, numeric body stays right) -- explicit per the Executive Scan Table spec. The <colgroup>
+   in renderOverview is the single column-width definition shared by thead and tbody. */
+.ovp-table thead th { text-align: center; padding: 10px 10px; background: #f2efe8; border-bottom: 2px solid var(--border); font-size: 11px; color: var(--text2); font-weight: 700; overflow-wrap: break-word; }
+/* Executive Scan Table: 1 KPI = 1 compact row (~60-80px), no narrative under the name anymore --
+   summary/problem/next-action are their own clamped columns (see .ovp-narrative-*). */
 .ovp-table tbody td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.ovp-table tbody td.num { text-align: right; }
 .ovp-row-main { background: #fff; }
 .ovp-row-sub td:first-child { padding-left: 0; }
 .ovp-row-sub { background: #fbfaf7; }
+/* Expanded child (sub) rows read lighter than their parent -- thinner weight across the whole
+   row, score badges included -- so the hierarchy (bold parent, light children) is visible at a
+   glance, not just from indent. font-weight cascades to plain text (name/narrative/status/unit/
+   result) automatically; the id <b> and the three score badges set their own weight and need an
+   explicit override. */
+.ovp-row-sub { font-weight: 300; font-size: 12px; }
+.ovp-row-sub .ovp-id-cell b { font-weight: 400; font-size: 12px; }
+.ovp-row-sub .ovp-badge,
+.ovp-row-sub .ovp-badge-forecast,
+.ovp-row-sub .ovp-badge-target { font-weight: 400; font-size: 12px; }
+.ovp-row-sub .ovp-narrative-text,
+.ovp-row-sub .ovp-status-txt { font-size: 12px; }
 .ovp-row-hidden { display: none; }
-.ovp-id-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ovp-id-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ovp-caret { width: 16px; height: 16px; border: none; background: none; cursor: pointer; font-size: 10px; color: var(--text2); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; transition: transform 0.15s; }
 .ovp-caret.open { transform: rotate(90deg); }
 .ovp-caret.spacer { visibility: hidden; }
 .ovp-indent { display: inline-block; width: 14px; }
-.ovp-name-cell { max-width: 280px; }
+.ovp-name-cell { overflow-wrap: break-word; text-align: left; }
+/* คะแนน / คาดการณ์ / Target are deliberately three different visual weights (see app.js
+   ovpBadge/ovpForecastBadge/ovpTargetBadge) so they never read as "the same kind of score":
+   คะแนน = solid fill (primary, current); คาดการณ์ = tinted outline (a projection, lighter
+   weight); Target = neutral card (a reference value, never semantic red/green/yellow). */
 .ovp-badge { color: #fff; border-radius: 10px; padding: 2px 9px; font-weight: 700; font-size: 11.5px; display: inline-block; min-width: 44px; text-align: center; }
 .ovp-badge.empty { background: var(--lv-none); color: #6b615a; }
-.ovp-status-txt { font-size: 11.5px; color: var(--text2); max-width: 220px; display: block; }
-.ovp-owner-txt { font-size: 11.5px; color: var(--text); max-width: 180px; }
-.ovp-alert-flag { color: var(--brand); font-weight: 700; cursor: pointer; }
+.ovp-badge-forecast { border: 1.5px solid; border-radius: 10px; padding: 1px 8px; font-weight: 700; font-size: 11.5px; display: inline-block; min-width: 44px; text-align: center; }
+.ovp-badge-forecast.empty { border-color: var(--border); color: var(--text3); background: transparent; }
+.ovp-badge-target { background: #f2efe8; border: 1px solid #d8d3c4; color: var(--text); border-radius: 10px; padding: 2px 9px; font-weight: 700; font-size: 11.5px; display: inline-block; min-width: 44px; text-align: center; }
+.ovp-badge-target.empty { color: var(--text3); }
+.ovp-narrative-cell { overflow-wrap: break-word; text-align: left; }
+.ovp-narrative-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; font-size: 12px; color: var(--text2); }
+/* Parent rows show a derived roll-up (counts/ids from real child scores), never child narrative
+   text concatenated together -- kept visually distinct (italic) from a genuine leaf narrative. */
+.ovp-rollup-text { font-style: italic; color: var(--text2); }
+/* Centered to match the (centered) header above it -- a lone "—" or short status left-flush in a
+   wider column visually read as "misaligned" against the centered "สถานะ" header, even though the
+   underlying <td> boundary was already correct. */
+/* display:flex directly on a <td> can make the browser miscompute that cell's row-box height
+   independently of its siblings (the row divider then drifts out of sync with the rest of the
+   row, worse the taller the narrative cells next to it get) -- flex lives on an inner wrapper
+   instead, so the <td> itself stays a normal table-cell and the row's height/border is governed
+   the same way as every other cell in the row. */
+.ovp-status-cell { vertical-align: middle; }
+.ovp-status-inner { display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; height: 100%; }
+.ovp-status-txt { font-size: 11.5px; color: var(--text2); overflow-wrap: break-word; white-space: normal; }
+.ovp-alert-flag { color: var(--brand); font-weight: 700; cursor: pointer; flex: 0 0 auto; }
 .ovp-alert-none { color: var(--text3); }
 .ovp-detail-btn { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text2); }
 .ovp-detail-btn:hover { background: #f2efe8; }
+/* Overview-only compact detail control (Detail page keeps its own .ovp-detail-btn look/behavior
+   in its child-KPI table -- see all_kpis.js -- untouched by this). */
+.ovp-action-cell { text-align: center; }
+.ovp-detail-icon { border: 1px solid var(--border); background: #fff; border-radius: 6px; width: 26px; height: 26px; line-height: 1; font-size: 15px; cursor: pointer; font-family: inherit; color: var(--text2); }
+.ovp-detail-icon:hover { background: #f2efe8; color: var(--text); }
 .ovp-empty-cell { color: var(--text3); }
 .ovp-cell-na { color: var(--text3); font-style: italic; cursor: help; }
 .ovp-cell-missing { color: var(--text3); cursor: help; }
@@ -82,15 +129,21 @@ main { max-width: 1720px; margin: 0 auto; padding: 24px 28px 56px; }
 .dtl-sidebar { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; box-shadow: var(--shadow); }
 .dtl-sec-title { font-weight: 700; font-size: 12px; padding: 8px 6px; cursor: pointer; color: var(--text); }
 .dtl-sec-body { padding-left: 2px; }
-.dtl-node { padding: 5px 6px; font-size: 12px; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 6px; color: var(--text2); }
+.dtl-node { padding: 5px 6px; font-size: 12px; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 6px; color: var(--text2); font-weight: 400; }
 .dtl-node:hover { background: #f2efe8; }
-.dtl-node.active { background: var(--brand); color: #fff; font-weight: 700; }
+.dtl-node.active { background: var(--brand); color: #fff; font-weight: 500; box-shadow: inset 3px 0 0 var(--brand); }
+.dtl-node.dtl-node-child { font-weight: 300; color: var(--text3); }
+.dtl-node.dtl-node-child.active { color: #fff; font-weight: 500; }
 .dtl-node-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dtl-node-id { font-weight: 400; }
 .dtl-score-chip { font-size: 10px; border-radius: 8px; padding: 1px 6px; color: #fff; flex: 0 0 auto; }
 .dtl-caret { width: 12px; display: inline-block; font-size: 9px; flex: 0 0 auto; }
 .dtl-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .dtl-header-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
 .dtl-breadcrumb { font-size: 11.5px; color: var(--text3); margin-bottom: 6px; }
+/* KPI Info box, made one level more prominent than the plain-white cards below it */
+.dtl-header-card-lead { background: var(--bg); border-color: var(--border); }
+.dtl-kpi-title-line { font-size: 17px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
 .dtl-h1 { font-size: 18px; font-weight: 800; color: var(--text); }
 .dtl-id-badge { color: var(--brand); margin-right: 6px; }
 .dtl-meta-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-top: 12px; }
@@ -100,25 +153,66 @@ main { max-width: 1720px; margin: 0 auto; padding: 24px 28px 56px; }
 .dtl-qbtn { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit; color: var(--text2); }
 .dtl-qbtn.active { background: var(--brand); color: #fff; border-color: var(--brand); }
 .dtl-qbtn.disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Quarter Switcher -- a navigation strip (underline tabs), never 4 boxed buttons */
+.dtl-qswitcher { display: flex; gap: 10px; }
+.dtl-qswitch-btn { border: 1.5px solid var(--border); background: var(--card); border-radius: 999px; padding: 8px 22px; cursor: pointer; font-family: inherit; font-size: 13.5px; font-weight: 500; color: var(--text2); transition: background .15s, color .15s, border-color .15s; }
+.dtl-qswitch-btn:hover { background: var(--bg); border-color: var(--text3); }
+.dtl-qswitch-btn.active { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+.dtl-qswitch-btn.empty { opacity: 0.5; }
+
 .dtl-cards { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
-.dtl-card { border-radius: 12px; padding: 14px; box-shadow: var(--shadow); }
+.dtl-card { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 12px; padding: 14px; box-shadow: var(--shadow); }
+
+/* KPI Information Header -- ONE box, label:value rows. Labels carry the weight; values stay
+   Regular 400 (brief Round-4 §2) -- including the id/name row, which is only larger in SIZE. */
+.dtl-info-rows { display: flex; flex-direction: column; gap: 9px; margin-top: 8px; }
+.dtl-info-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.dtl-info-row.split { gap: 32px; }
+.dtl-info-pair { display: flex; gap: 8px; align-items: baseline; }
+.dtl-info-label { font-size: 13px; font-weight: 500; color: var(--text2); flex: 0 0 auto; }
+.dtl-info-val { font-size: 14px; font-weight: 400; color: var(--text); }
+
+/* 3-column metrics -- one flat region, thin rules only, never 3 cards */
+.dtl-metrics-row { display: grid; grid-template-columns: 1fr 1fr 1fr; text-align: center; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.dtl-metric-col { position: relative; padding: 0 10px; }
+.dtl-metric-col + .dtl-metric-col::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 1px; background: var(--border); }
+.dtl-metric-label { font-size: 11.5px; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
+.dtl-metric-val { font-size: 22px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.dtl-metric-unit { font-size: 12px; font-weight: 400; color: var(--text2); }
+.dtl-metric-sub { margin-top: 6px; font-size: 11.5px; color: var(--text2); }
+.dtl-metric-sub b { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Flowing sections (Performance Bar, Monthly Trend) -- no card shell, just a plain heading */
+.dtl-flow-section { padding-top: 4px; }
+.dtl-flow-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+
+/* Bullet-style Performance Bar -- one axis: MOU thresholds + forecast, not time/% */
+.dtl-bullet-track { position: relative; height: 8px; background: var(--bg); border-radius: 4px; margin: 10px 6px 24px; }
+.dtl-bullet-fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 4px; transition: width 0.3s, background 0.3s; }
+.dtl-bullet-caption { font-size: 11px; font-weight: 300; color: var(--text3); }
+
+/* Scoring-criteria reference chips, right under the bar -- not interactive, not colored per level */
+.dtl-criteria-label { font-size: 11px; font-weight: 500; color: var(--text2); margin-top: 16px; margin-bottom: 6px; }
+.dtl-criteria-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dtl-chip { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); font-size: 11.5px; font-weight: 400; color: var(--text2); }
+.dtl-chip.lv5 { background: #fff; border-color: var(--text3); font-weight: 600; color: var(--text); }
+
+/* Monthly line/dot trend -- replaces the 9-bar grid entirely */
+
+/* Observation -- text block with a thin accent line, never a boxed card */
+.dtl-observation { border-left: 3px solid var(--brand); padding: 2px 0 2px 14px; }
+.dtl-observation-title { font-size: 11px; font-weight: 500; color: var(--text2); margin-bottom: 4px; }
 .dtl-card-label { font-size: 11.5px; font-weight: 700; margin-bottom: 6px; }
-.dtl-card-val { font-size: 20px; font-weight: 800; }
+.dtl-card-val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .dtl-card-sub { font-size: 10.5px; margin-top: 4px; opacity: 0.85; }
-.dtl-card.c-actual { background: #fff8e1; border: 1px solid #f0d98a; }
-.dtl-card.c-score { background: #fdecec; border: 1px solid #f0b3b3; }
-.dtl-card.c-fcresult { background: #eaf1fb; border: 1px solid #b9cdec; }
-.dtl-card.c-fcscore { background: #eafaf1; border: 1px solid #a9e0c0; }
 .dtl-section-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
-.dtl-monthly-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 11.5px; }
-.dtl-monthly-label { width: 52px; color: var(--text2); flex: 0 0 auto; }
-.dtl-monthly-bar-wrap { flex: 1; background: var(--bg); border-radius: 4px; overflow: hidden; height: 14px; }
-.dtl-monthly-bar { height: 100%; background: var(--brand); }
-.dtl-monthly-val { width: 70px; text-align: right; font-weight: 600; flex: 0 0 auto; }
 .dtl-cumulative-note { margin-top: 10px; font-size: 11.5px; color: var(--text2); border-top: 1px dashed var(--border); padding-top: 8px; }
-.dtl-qtable { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
-.dtl-qtable th { text-align: left; padding: 6px 8px; background: var(--bg); border-bottom: 2px solid var(--border); font-size: 10.5px; color: var(--text2); }
-.dtl-qtable td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.dtl-qtable { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.dtl-qtable th { text-align: left; padding: 6px 8px; background: var(--bg); border-bottom: 2px solid var(--border); font-size: 10.5px; color: var(--text2); font-weight: 500; }
+.dtl-qtable td { padding: 6px 8px; border-bottom: 1px solid var(--border); font-weight: 400; }
+.dtl-qtable tr.current-q { background: var(--bg); box-shadow: inset 3px 0 0 var(--brand); }
+.dtl-qtable tr.current-q td:first-child { font-weight: 500; }
 .dtl-forecast-row { margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12px; background: var(--bg); border-radius: 8px; padding: 8px 12px; }
 .dtl-support-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .dtl-support-item { margin-bottom: 4px; }
@@ -129,29 +223,32 @@ main { max-width: 1720px; margin: 0 auto; padding: 24px 28px 56px; }
 .dtl-criteria-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: center; }
 .dtl-criteria-table th { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: center; }
 .dtl-page-title { font-size: 20px; font-weight: 800; color: var(--brand); margin-bottom: 2px; }
-.dtl-progress-labels { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text2); margin-bottom: 4px; }
-.dtl-progress-track { height: 20px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; position: relative; }
-.dtl-progress-fill { height: 100%; background: var(--brand); border-radius: 10px 0 0 10px; transition: width 0.3s; }
-.dtl-progress-stats { display: flex; gap: 24px; margin-top: 10px; flex-wrap: wrap; }
-.dtl-progress-stat { font-size: 11.5px; color: var(--text2); }
-.dtl-progress-stat b { display: block; font-size: 16px; color: var(--text); font-weight: 800; }
-.dtl-monthly-mini { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.dtl-monthly-mini-title { font-size: 10.5px; color: var(--text3); margin-bottom: 4px; }
-.dtl-monthly-mini-row { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text2); }
-.dtl-monthly-mini-row span b { color: var(--text); font-weight: 700; }
+
+.dtl-monthly-mini-unit { font-size: 10px; font-weight: 300; opacity: 0.8; }
+
+/* Monthly data -- always 12 equal columns so the layout never reflows across quarters */
+.dtl-monthly-grid { display: grid; grid-template-columns: repeat(12, minmax(0,1fr)); gap: 4px; text-align: center; }
+.dtl-monthly-cell { text-align: center; }
+.dtl-monthly-month { display: block; width: 100%; font-size: 10.5px; font-weight: 400; color: var(--text3); text-align: center; }
+.dtl-monthly-val { display: block; width: 100%; font-size: 8px; font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; text-align: center; margin-top: 3px; }
+
+.dtl-trend-text { font-size: 13px; color: var(--text); line-height: 1.6; }
 .dtl-owners { display: flex; flex-direction: column; gap: 12px; }
-.dtl-owner-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); display: flex; gap: 10px; align-items: flex-start; }
-.dtl-owner-role { font-size: 10.5px; color: var(--text2); font-weight: 700; margin-bottom: 6px; }
-.dtl-owner-name { font-size: 12px; color: var(--text); padding: 2px 0; }
+.dtl-owner-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; }
+.dtl-owner-role { font-size: 10.5px; color: var(--text2); font-weight: 700; }
+.dtl-owner-people { display: flex; flex-direction: column; gap: 8px; }
+.dtl-person { display: flex; align-items: center; gap: 8px; }
+.dtl-owner-name { font-size: 12px; color: var(--text); font-weight: 400; }
 .dtl-owner-card.primary { border-color: var(--brand); background: #fdf3f1; }
 .dtl-owner-card.primary .dtl-owner-role { color: var(--brand); font-size: 11.5px; }
 .dtl-owner-card.primary .dtl-owner-name { font-size: 13.5px; font-weight: 700; }
 .dtl-owner-card.secondary .dtl-owner-name { font-weight: 600; }
 .dtl-owner-card.compact { padding: 10px; }
-.dtl-owner-card.compact .dtl-owner-name { font-size: 11.5px; padding: 1px 0; }
-.dtl-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--border); color: var(--text2); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex: 0 0 auto; }
-.dtl-owner-card.primary .dtl-avatar { width: 42px; height: 42px; background: var(--brand); color: #fff; }
-.dtl-owner-body { flex: 1; min-width: 0; }
+.dtl-owner-card.compact .dtl-owner-name { font-size: 11.5px; }
+.dtl-owner-card.compact .dtl-avatar { width: 26px; height: 26px; }
+.dtl-avatar { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.dtl-avatar-icon { width: 58%; height: 58%; }
+.dtl-owner-card.primary .dtl-avatar { width: 40px; height: 40px; }
 .entry-header-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); margin-bottom: 14px; }
 .entry-header-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .entry-header-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
@@ -335,6 +432,8 @@ textarea.entry-input { resize: vertical; }
 .alert-preview-field { display: flex; gap: 8px; padding: 4px 0; font-size: 12.5px; color: var(--text2); }
 .alert-preview-field b { color: var(--text); }
 .alert-preview-body { background: var(--bg); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--text); line-height: 1.7; margin: 8px 0; white-space: pre-line; }
+@font-face { font-family: Anakotmai; src: url('assets/fonts/anakotmai-light.woff2') format('woff2'); font-weight: 100 399; font-display: swap; }
+@font-face { font-family: Anakotmai; src: url('assets/fonts/anakotmai-medium.woff2') format('woff2'); font-weight: 400 699; font-display: swap; }
 @font-face { font-family: Anakotmai; src: url('assets/fonts/anakotmai-bold.woff2') format('woff2'); font-weight: 700 900; font-display: swap; }
 :root { --font-display: Anakotmai,sans-serif; }
 body { font-family: Anakotmai,sans-serif; }
@@ -354,6 +453,8 @@ body:has(#page-detail.active) header { background: #f3f5f8; border-bottom: 1px s
 body:has(#page-detail.active) main { max-width: 1920px; padding: 16px 20px 20px; }
 body:has(#page-detail.active) .tab-btn { background: transparent; color: #68758c; border-radius: 12px; font-size: 14px; padding: 8px 12px; }
 body:has(#page-detail.active) .tab-btn.active { background: #e1e9f4; color: #2d527c; }
+body:has(#page-detail.active) header .asof { display: none; }
+body:has(#page-detail.active) header #dataSourceBadge { display: none; }
 #page-detail { --brand: #315880; --bg: #f3f5f8; --card: #fff; --text: #293750; --text2: #5d6c83; --text3: #738096; --border: #e5eaf1; --shadow: 0 4px 20px #273c5710; line-height: 1.6; color: var(--text); }
 #page-detail .dtl-shell { grid-template-columns: minmax(230px,20fr) minmax(0,60fr) minmax(190px,20fr); gap: 14px; }
 #page-detail .dtl-header-card { border-radius: 18px; border: 1px solid var(--border); box-shadow: var(--shadow); padding: 14px 16px; }
@@ -362,46 +463,54 @@ body:has(#page-detail.active) .tab-btn.active { background: #e1e9f4; color: #2d5
 #page-detail .dtl-owner-card { border-radius: 18px; border: 1px solid var(--border); box-shadow: var(--shadow); padding: 14px 16px; }
 #page-detail .dtl-card { border-radius: 18px; border: 1px solid var(--border); box-shadow: var(--shadow); padding: 14px 16px; }
 #page-detail .dtl-sec-title { font-size: 14px; }
-#page-detail .dtl-node { font-size: 14px; }
+#page-detail .dtl-node { font-size: 11.5px; }
 #page-detail .dtl-owner-name { font-size: 14px; }
 #page-detail .dtl-node { align-items: flex-start; padding: 8px 6px; }
 #page-detail .dtl-node-label { white-space: normal; overflow: visible; line-height: 1.5; }
 #page-detail .dtl-node.active { background: #e1e9f4; color: #2d527c; }
 #page-detail .dtl-node:hover { background: #eef3f9; }
-#page-detail .dtl-score-chip { font-size: 12px; color: #293750; }
+#page-detail .dtl-score-chip { font-size: 9.5px; color: #293750; }
 #page-detail .dtl-h1 { font-size: 20px; line-height: 1.5; }
 #page-detail .card-title { font-size: 17px; margin-bottom: 10px; }
 #page-detail .dtl-page-title { font-size: 20px; }
-#page-detail .dtl-meta-grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; }
+#page-detail .dtl-meta-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; max-width: 320px; }
 #page-detail .dtl-meta-item { font-size: 12px; color: var(--text2); }
 #page-detail .dtl-card-sub { font-size: 12px; color: var(--text2); }
 #page-detail .dtl-breadcrumb { font-size: 12px; color: var(--text2); }
 #page-detail .dtl-owner-role { font-size: 12px; color: var(--text2); }
-#page-detail .dtl-monthly-mini-title { font-size: 12px; color: var(--text2); }
+#page-detail .dtl-monthly-month { font-size: 11.5px; }
+#page-detail .dtl-monthly-val { font-size: 9px; }
+#page-detail .dtl-qswitch-btn { font-size: 15px; padding: 9px 26px; }
+#page-detail .dtl-metric-label { font-size: 12.5px; }
+#page-detail .dtl-metric-val { font-size: 24px; }
+#page-detail .dtl-metric-unit { font-size: 13px; }
+#page-detail .dtl-metric-sub { font-size: 12.5px; }
+#page-detail .dtl-metric-sub b { font-size: 14px; }
+#page-detail .dtl-flow-title { font-size: 15px; }
+#page-detail .dtl-bullet-caption { font-size: 12px; }
+#page-detail .dtl-kpi-title-line { font-size: 20px; }
+#page-detail .dtl-criteria-label { font-size: 12.5px; }
+#page-detail .dtl-chip { font-size: 12.5px; padding: 6px 14px; }
+#page-detail .dtl-monthly-mini-unit { font-size: 11px; }
+#page-detail .dtl-observation-title { font-size: 12px; }
+#page-detail .dtl-trend-text { font-size: 14px; }
 #page-detail .dtl-source-note { font-size: 12px; color: var(--text2); }
 #page-detail .dtl-meta-item b { font-size: 14px; }
 #page-detail .dtl-card-label { font-size: 14px; }
 #page-detail .dtl-support-label { font-size: 14px; }
 #page-detail .dtl-support-val { font-size: 14px; }
-#page-detail .dtl-progress-labels { font-size: 14px; }
-#page-detail .dtl-progress-stat { font-size: 14px; }
 #page-detail .dtl-qtable { font-size: 14px; }
 #page-detail .dtl-qtable th { font-size: 14px; }
-#page-detail .dtl-monthly-mini-row { font-size: 14px; }
 #page-detail .dtl-criteria-table { font-size: 14px; }
 #page-detail .dtl-cards { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
 #page-detail .dtl-card { background: #f8fafc; }
-#page-detail .dtl-card.c-actual { background: #eaf0f8; border-color: #d9e3f0; }
 #page-detail .dtl-card-val { font-size: 27px; line-height: 1.4; color: #293750; }
 #page-detail .dtl-qbtn { font-size: 14px; border-radius: 10px; padding: 8px 12px; }
 #page-detail .dtl-qbtn.active { background: #e1e9f4; color: #2d527c; border-color: #9fb8d5; }
 #page-detail .dtl-qbtn.empty { background: #f3f5f8; color: #8793a4; }
 #page-detail button:focus-visible { outline: 3px solid #557ba6; outline-offset: 3px; }
 #page-detail .dtl-owner-card.primary { background: #eaf0f8; border-color: #d9e3f0; }
-#page-detail .dtl-owner-card.primary .dtl-avatar { background: #315880; }
 #page-detail .dtl-source-note { margin: 10px 0; line-height: 1.6; }
-#page-detail .dtl-reconciliation { margin-top: 14px; padding: 12px; border: 1px solid #d9e3f0; border-radius: 10px; background: #eef3f9; font-size: 14px; }
-#page-detail .dtl-reconciliation.needs-review { background: #fff8df; border-color: #e9d68d; }
 #page-detail .dtl-qtable th { padding: 10px 8px; }
 #page-detail .dtl-qtable td { padding: 10px 8px; }
 #page-detail .dtl-section-card { overflow-x: auto; }
@@ -438,6 +547,11 @@ body:has(#page-detail.active) .tab-btn.active { background: #e1e9f4; color: #2d5
 @media(max-width:760px) {
   #page-detail .dtl-qtable { min-width: 580px; }
 }
+@media(max-width:600px) {
+  #page-detail .dtl-hero { grid-template-columns: 1fr; }
+  #page-detail .dtl-qswitcher { flex-wrap: wrap; }
+  #page-detail .dtl-qswitch-btn { min-width: 45%; }
+}
 @media(max-width:450px) {
   #page-detail .dtl-cards { grid-template-columns: 1fr; }
 }
@@ -452,21 +566,3 @@ body:has(#page-detail.active) .tab-btn.active { background: #e1e9f4; color: #2d5
   .entry-header-right { flex-wrap:wrap; justify-content:flex-end; }
   .entry-data-tools { order:3; width:100%; justify-content:flex-end; }
 }
-
-/* Overview: compact executive scan table only. */
-#page-overview .ovp-table { table-layout: fixed; min-width: 1955px; }
-#page-overview .ovp-table tbody tr { height: 72px; }
-#page-overview .ovp-table td { overflow-wrap: anywhere; }
-#page-overview .ovp-table .ovp-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-#page-overview .ovp-table th { font-size: 12px; }
-#page-overview .ovp-name-cell { font-weight: 600; }
-#page-overview .ovp-row-sub .ovp-name-cell { font-weight: 400; }
-#page-overview .ovp-indent { flex-shrink: 0; }
-#page-overview .ovp-caret { font-size: 16px; }
-#page-overview .ovp-narrative { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: var(--text2); text-align: left; cursor: pointer; }
-#page-overview .ovp-narrative span, #page-overview .ovp-status-txt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.5; max-height: 3em; overflow-wrap: anywhere; }
-#page-overview .ovp-narrative:hover { text-decoration: underline; }
-#page-overview .ovp-status-cell { display: flex; align-items: center; gap: 4px; }
-#page-overview .ovp-alert-flag { padding: 0; border: 0; background: none; flex-shrink: 0; }
-#page-overview .ovp-detail-btn { font-size: 22px; line-height: 1; }
-#quickDetailOverlay .ovp-narrative-modal .ovp-narrative-full { white-space: pre-wrap; overflow-wrap: anywhere; }
