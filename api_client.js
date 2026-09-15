@@ -191,7 +191,14 @@ async function pollWriteStatus_(requestId) {
   await sleep_(WRITE_POLL_INITIAL_DELAY_MS);
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${API_BASE_URL}?action=writeStatus&requestId=${encodeURIComponent(requestId)}`);
+      // Step 5B.5: `_ts` is a cache-busting query param ONLY — transport-level, never read by
+      // Code.gs (doGet still keys off action/requestId alone). Without it, the browser (and/or an
+      // intermediate cache) was reusing the FIRST poll's response — taken before doPost even
+      // finished, so it was always {pending:true} — for every later poll of the identical URL,
+      // which is why production never showed repeated doGet executions and always timed out.
+      // `cache:'no-store'` is the same fix at the fetch-API level, belt-and-suspenders with `_ts`.
+      const url = `${API_BASE_URL}?action=writeStatus&requestId=${encodeURIComponent(requestId)}&_ts=${Date.now()}`;
+      const res = await fetch(url, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data && !data.pending) return data;
