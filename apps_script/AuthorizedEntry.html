@@ -1,0 +1,169 @@
+<!--
+  AuthorizedEntry.html — Step 5B-FINAL: minimal proof page for the "Authorized Entry" surface,
+  served directly by this Apps Script Web App at ?view=authorized_entry (see Code.gs's doGet /
+  renderAuthorizedEntry_). Opened directly by a human — never embedded in an iframe, never linked
+  from the public GitHub Pages viewer (which stays strictly read-only; see api_client.js there).
+
+  Because this page IS the Apps Script origin, it calls google.script.run directly — no CORS, no
+  iframe bridge, no postMessage/MessageChannel, no hidden form, no writeStatus polling. All of
+  that machinery (Steps 5B.1-5B.4) existed only because GitHub Pages is a different origin than
+  Apps Script; that problem doesn't exist here.
+
+  Scope discipline for this round: MINIMAL PROOF PAGE ONLY. A token field, a "ทดสอบการเชื่อมต่อ"
+  (test connection) button that calls the existing writeSmokeTest action, and a plain-text result
+  area. No real KPI entry form yet — that's a later step, and only after this proof is reviewed.
+
+  Token handling: the human types their own MOU69_WRITE_TOKEN in here at runtime. Kept in a
+  page-memory variable and (as a same-page-load convenience only) sessionStorage — NEVER
+  localStorage, NEVER a URL/query string, NEVER written into this file's source, NEVER logged
+  (no console.log of the token anywhere below). It travels to the server only as a
+  google.script.run call argument — Apps Script transports that itself; this page never makes an
+  HTTP request of its own. The actual authorization decision is 100% server-side, inside
+  checkAuth_ (called from processWriteRequest_, via the existing bridgeWrite RPC — see Code.gs).
+-->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
+    background: #f3f5f8; color: #241f1c; margin: 0; padding: 24px;
+  }
+  .card {
+    max-width: 460px; margin: 48px auto; background: #fff; border-radius: 14px;
+    box-shadow: 0 2px 6px rgba(36,31,28,0.06), 0 16px 32px rgba(36,31,28,0.08);
+    padding: 28px 28px 24px;
+  }
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #a99e93; margin: 0 0 4px; }
+  h1 { font-size: 20px; margin: 0 0 22px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: #75695f; margin-bottom: 6px; }
+  input[type=password] {
+    width: 100%; padding: 10px 12px; border: 1px solid #eae5dc; border-radius: 8px;
+    font-size: 14px; font-family: inherit; margin-bottom: 16px;
+  }
+  input[type=password]:focus { outline: none; border-color: #e6432f; }
+  button {
+    width: 100%; padding: 11px; border: none; border-radius: 8px;
+    background: #e6432f; color: #fff; font-weight: 700; font-size: 14px;
+    font-family: inherit; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .status {
+    margin-top: 18px; padding: 11px 14px; border-radius: 8px;
+    font-size: 13px; line-height: 1.6; font-weight: 600;
+  }
+  .status.idle { background: #f3f5f8; color: #75695f; }
+  .status.testing { background: #fff4e8; color: #8a5a1a; }
+  .status.ok { background: #eafaf1; color: #1f7d51; }
+  .status.unauthorized, .status.error { background: #fdecec; color: #a5322b; }
+  .result {
+    margin-top: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; white-space: pre-wrap; word-break: break-all;
+    color: #75695f; background: #f8f6f2; border-radius: 8px; padding: 10px 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="eyebrow">PAT-PHET MOU69</div>
+    <h1>Authorized Entry</h1>
+
+    <label for="tokenInput">Write Token</label>
+    <input type="password" id="tokenInput" autocomplete="off" placeholder="วาง MOU69_WRITE_TOKEN ที่นี่">
+
+    <button id="testBtn" type="button">ทดสอบการเชื่อมต่อ</button>
+
+    <div id="statusBox" class="status idle">สถานะ: ยังไม่ได้ยืนยันตัวตน (Not authenticated)</div>
+    <div id="resultBox" class="result" style="display:none"></div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Same-page-load convenience only — this page's own sessionStorage, scoped to this Apps
+  // Script origin. Never localStorage. Never logged (no console.log of the token, ever).
+  var TOKEN_SESSION_KEY = 'mou69_authorized_entry_token';
+  var tokenMemory = null;
+
+  function getStoredToken() {
+    try { return sessionStorage.getItem(TOKEN_SESSION_KEY); } catch (e) { return null; }
+  }
+  function storeToken(t) {
+    tokenMemory = t || null;
+    try {
+      if (t) sessionStorage.setItem(TOKEN_SESSION_KEY, t);
+      else sessionStorage.removeItem(TOKEN_SESSION_KEY);
+    } catch (e) { /* private mode / quota — the in-memory copy still works for this page load */ }
+  }
+
+  var tokenInput = document.getElementById('tokenInput');
+  var testBtn = document.getElementById('testBtn');
+  var statusBox = document.getElementById('statusBox');
+  var resultBox = document.getElementById('resultBox');
+
+  var stored = getStoredToken();
+  if (stored) { tokenInput.value = stored; tokenMemory = stored; }
+  tokenInput.addEventListener('input', function () { storeToken(tokenInput.value); });
+
+  function requestId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function setStatus(kind, text) {
+    statusBox.className = 'status ' + kind;
+    statusBox.textContent = 'สถานะ: ' + text;
+  }
+
+  // Safe to display in full — processWriteRequest_'s response shape never contains the token
+  // (checkAuth_ only ever returns true/false; nothing echoes the input back — see Code.gs §6).
+  function showResult(obj) {
+    resultBox.style.display = 'block';
+    resultBox.textContent = JSON.stringify(obj, null, 2);
+  }
+
+  function handleResult(res) {
+    testBtn.disabled = false;
+    if (res && res.ok) {
+      setStatus('ok', 'เชื่อมต่อสำเร็จ — Write API ทำงานได้ปกติ (Authorized)');
+    } else if (res && res.code === 'UNAUTHORIZED') {
+      setStatus('unauthorized', 'Token ไม่ถูกต้องหรือไม่ได้กรอก (Unauthorized)');
+    } else {
+      setStatus('error', ((res && res.message) || 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์') + ' (Error)');
+    }
+    showResult(res);
+  }
+
+  function handleFailure(err) {
+    testBtn.disabled = false;
+    setStatus('error', 'เรียก Apps Script ไม่สำเร็จ (Error)');
+    showResult({ ok: false, message: String(err) });
+  }
+
+  testBtn.addEventListener('click', function () {
+    var token = tokenMemory || tokenInput.value;
+    testBtn.disabled = true;
+    resultBox.style.display = 'none';
+    setStatus('testing', 'กำลังทดสอบ... (Testing...)');
+
+    // Reuses the existing bridgeWrite(body) RPC (Step 5B.1) — no new server function. bridgeWrite
+    // just calls processWriteRequest_(body||{}); nothing here duplicates that logic.
+    google.script.run
+      .withSuccessHandler(handleResult)
+      .withFailureHandler(handleFailure)
+      .bridgeWrite({
+        action: 'writeSmokeTest',
+        authToken: token,
+        requestId: requestId(),
+        actorName: 'AuthorizedEntry-smoke-test',
+        clientInfo: 'AuthorizedEntry.html',
+      });
+  });
+})();
+</script>
+</body>
+</html>

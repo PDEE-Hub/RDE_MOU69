@@ -31,9 +31,15 @@ function doGet(e) {
   const action = (e && e.parameter && e.parameter.action) || '';
   const view = (e && e.parameter && e.parameter.view) || '';
   try {
-    // Step 5B.1/5B.2/5B.3 route — kept (unused by the frontend as of 5B.4, see api_client.js's
-    // header comment) rather than deleted; costs nothing to leave and avoids a destructive diff.
+    // Step 5B.1/5B.2/5B.3 route — kept (unused by the public GitHub Pages frontend as of 5B.4,
+    // see api_client.js's header comment) rather than deleted; costs nothing to leave and avoids
+    // a destructive diff.
     if (view === 'write_bridge') return renderWriteBridge_(e);
+    // Step 5B-FINAL: the Authorized Entry proof page (§2) — served directly on this Apps Script
+    // origin, opened by a human, never embedded/linked from the public GitHub Pages viewer. Uses
+    // google.script.run natively (same-origin to itself), so none of 5B.1-5B.4's cross-origin
+    // transport problems apply here at all.
+    if (view === 'authorized_entry') return renderAuthorizedEntry_();
     if (action === 'health') return jsonOut(handleHealth());
     if (action === 'bootstrap') return jsonOut(handleBootstrap(e.parameter.fiscal_year));
     // Step 5B.4: the only new route the frontend actually uses now. No auth required — requestId
@@ -68,6 +74,17 @@ function renderWriteBridge_(e) {
   template.bridgeSession = bridgeSession; // '' when missing/invalid — Bridge.html then refuses to send READY at all, so the parent simply times out rather than trusting an unverified session
   return template.evaluate()
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// Serves apps_script/AuthorizedEntry.html (Step 5B-FINAL) — a minimal proof page opened directly
+// on this Apps Script Web App URL by an authorized human (never embedded in an iframe, so no
+// XFrameOptionsMode override needed — the default DEFAULT mode is fine/preferred here). Plain
+// createHtmlOutputFromFile, no template variables: nothing server-side needs injecting into this
+// page — it authenticates purely via the token the human types in, checked entirely server-side
+// by checkAuth_ inside processWriteRequest_ when they click the test button.
+function renderAuthorizedEntry_() {
+  return HtmlService.createHtmlOutputFromFile('AuthorizedEntry')
+    .setTitle('PAT-PHET MOU69 — Authorized Entry');
 }
 
 function jsonOut(obj) {
@@ -497,16 +514,23 @@ function doPost(e) {
   return jsonOut(result);
 }
 
-// ── Bridge RPC surface (Step 5B.1) — PUBLIC functions (no trailing _) so google.script.run can
-// call them from Bridge.html. Neither does anything processWriteRequest_/the sheets above don't
-// already do; they're just the google.script.run-callable entry points.
-// STEP 5B.4: dead code as of this phase — the frontend now uses doPost (form POST) +
-// handleWriteStatus_ (GET polling) instead of this MessageChannel/google.script.run path. Kept
-// rather than deleted (see Bridge.html's own note); harmless either way since bridgeWrite still
-// only ever calls processWriteRequest_, never anything duplicated. ──
+// ── Bridge/Entry RPC surface (Step 5B.1, still in use as of 5B-FINAL) — PUBLIC functions (no
+// trailing _) so google.script.run can call them. Neither does anything processWriteRequest_/the
+// sheets above don't already do; they're just the google.script.run-callable entry points.
+//
+// STEP 5B.4 note: the public GitHub Pages frontend stopped calling this path (it uses doPost/
+// form-POST + handleWriteStatus_/GET-polling instead) — Bridge.html and its MessageChannel
+// handshake are dead code as of that phase.
+//
+// STEP 5B-FINAL: bridgeWrite is alive again as apps_script/AuthorizedEntry.html's write call —
+// reused as-is (not duplicated) because it already does exactly what that page needs:
+// `return processWriteRequest_(body || {})`. AuthorizedEntry.html runs same-origin to this Apps
+// Script (opened directly, never embedded), so it calls bridgeWrite via plain google.script.run —
+// no MessageChannel, no postMessage, no bridgeSession nonce involved for this caller. ──
 
-// Called by Bridge.html for BRIDGE_WRITE. `body` arrives already as a plain JS object —
-// google.script.run deserializes the argument for us; no JSON.parse needed here.
+// Called by Bridge.html (dead as of 5B.4) and by AuthorizedEntry.html (Step 5B-FINAL) for a write.
+// `body` arrives already as a plain JS object — google.script.run deserializes the argument for
+// us; no JSON.parse needed here.
 function bridgeWrite(body) {
   return processWriteRequest_(body || {});
 }
