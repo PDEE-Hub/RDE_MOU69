@@ -1,0 +1,72 @@
+<!--
+  Bridge.html — Step 5B.1 CORS-safe write transport.
+
+  Served by Code.gs's doGet at ?view=write_bridge (HtmlService, XFrameOptionsMode.ALLOWALL so
+  GitHub Pages can embed it in a hidden iframe). This page has NO UI for a human — its only job
+  is to sit in that iframe and relay two things between the GitHub Pages parent and the
+  google.script.run RPC surface (bridgeWrite/bridgeHealth in Code.gs):
+
+    parent --postMessage(BRIDGE_WRITE/BRIDGE_HEALTH)--> this page
+    this page --google.script.run--> Apps Script server (processWriteRequest_)
+    this page <--result/error-- Apps Script server
+    this page --postMessage(BRIDGE_RESPONSE)--> parent
+
+  No third-party library. No UI. Never logs the request body (it may contain authToken) or any
+  token value — only action/id/ok get referenced in code, nothing is printed.
+-->
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script>
+(function () {
+  'use strict';
+  var CHANNEL = 'MOU69_WRITE_BRIDGE';
+  // The only parent this bridge ever expects or replies to. Messages from any other origin are
+  // ignored outright (§B) — this is a static, known value (the dashboard's own GitHub Pages
+  // origin), not a guess, and it is also the only origin every outgoing postMessage ever targets
+  // (never '*'), so a reply can never be delivered to the wrong page even if this iframe were
+  // somehow navigated elsewhere first.
+  var PARENT_ORIGIN = 'https://pdee-hub.github.io';
+
+  function post(data) {
+    if (window.parent) window.parent.postMessage(data, PARENT_ORIGIN);
+  }
+
+  function respond(id, ok, result, errorCode, errorMessage) {
+    var msg = { channel: CHANNEL, type: 'BRIDGE_RESPONSE', id: id, ok: ok };
+    if (ok) msg.result = result;
+    else msg.error = { code: errorCode || 'BRIDGE_ERROR', message: errorMessage || 'Bridge request failed.' };
+    post(msg);
+  }
+
+  window.addEventListener('message', function (event) {
+    if (event.origin !== PARENT_ORIGIN) return; // (B) ignore anything not from the expected parent
+    var data = event.data;
+    if (!data || data.channel !== CHANNEL) return; // (C) wrong/no channel — not for us
+
+    if (data.type === 'BRIDGE_HEALTH') {
+      google.script.run
+        .withSuccessHandler(function (res) { respond(data.id, true, res); })
+        .withFailureHandler(function () { respond(data.id, false, null, 'BRIDGE_ERROR', 'bridgeHealth call failed.'); })
+        .bridgeHealth();
+      return;
+    }
+
+    if (data.type === 'BRIDGE_WRITE') {
+      // data.body may contain authToken — never logged, never echoed anywhere except forwarded
+      // as-is to the server over google.script.run (which Google, not this page, transports).
+      google.script.run
+        .withSuccessHandler(function (res) { respond(data.id, true, res); })
+        .withFailureHandler(function () { respond(data.id, false, null, 'BRIDGE_ERROR', 'bridgeWrite call failed.'); })
+        .bridgeWrite(data.body);
+      return;
+    }
+  }, false);
+
+  // (A) Tell the parent this iframe can now receive requests.
+  post({ channel: CHANNEL, type: 'BRIDGE_READY' });
+})();
+</script>
+</body>
+</html>

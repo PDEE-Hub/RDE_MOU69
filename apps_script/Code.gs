@@ -29,13 +29,29 @@ const READ_SHEETS = {
 
 function doGet(e) {
   const action = (e && e.parameter && e.parameter.action) || '';
+  const view = (e && e.parameter && e.parameter.view) || '';
   try {
+    // Step 5B.1: the only new route. Existing action=health/action=bootstrap behavior below is
+    // completely untouched — this is checked first only because `view` and `action` are
+    // different query params entirely, never a behavior change to the JSON GET API.
+    if (view === 'write_bridge') return renderWriteBridge_();
     if (action === 'health') return jsonOut(handleHealth());
     if (action === 'bootstrap') return jsonOut(handleBootstrap(e.parameter.fiscal_year));
     return jsonOut({ ok: false, error: 'unknown_action', action: action });
   } catch (err) {
     return jsonOut({ ok: false, error: String(err && err.message || err) });
   }
+}
+
+// Serves apps_script/Bridge.html — a tiny, UI-less page whose only job is to receive a
+// postMessage from the GitHub Pages parent, forward it to bridgeWrite/bridgeHealth via
+// google.script.run, and postMessage the result back. ALLOWALL is required for Google to let
+// this specific page be embedded in an iframe on another origin; it does NOT affect the JSON
+// GET API's CORS behavior in any way (that's a separate, unrelated response path).
+function renderWriteBridge_() {
+  return HtmlService.createTemplateFromFile('Bridge')
+    .evaluate()
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 function jsonOut(obj) {
@@ -315,10 +331,13 @@ function handleConfirmEntry_(body, requestId, ctx) {
   return { ok: true, action: 'confirmEntry', requestId: requestId, recordId: r.record.record_id, version: r.record.version };
 }
 
-// ── doPost — the ONLY write entry point. Minimal, allowlisted, never a generic
-// sheet/column/range passthrough (§4).
+// ── processWriteRequest_ — the ONE write processor. Both doPost (fetch/curl transport) and
+// bridgeWrite (google.script.run/postMessage transport, Step 5B.1) call this and nothing else —
+// there is no duplicate copy of auth/lock/idempotency/period/write logic anywhere. Takes and
+// returns a plain JS object; callers decide how to wrap/ship it (jsonOut for doPost, direct
+// return for bridgeWrite since google.script.run serializes plain objects itself).
 //
-// Pre-deployment hardening: auth is checked TWICE, deliberately —
+// Auth is checked TWICE, deliberately —
 //   (1) BEFORE acquiring ScriptLock, so an unauthenticated/public request is rejected on a cheap
 //       PropertiesService read and never gets to contend for the lock at all (a flood of bad
 //       requests can't starve a legitimate writer waiting on the lock).
@@ -326,69 +345,99 @@ function handleConfirmEntry_(body, requestId, ctx) {
 //       only checks that are allowed to be trusted are the ones made while holding the lock,
 //       since that's the only point nothing else can change out from under this request.
 // Neither check replaces the other. ──
-function doPost(e) {
+function processWriteRequest_(body) {
   let gotLock = false;
   let lock = null;
   try {
-    let body;
-    try {
-      body = (e && e.postData && e.postData.contents) ? JSON.parse(e.postData.contents) : {};
-    } catch (parseErr) {
-      return jsonOut({ ok: false, code: 'INVALID_REQUEST', message: 'Malformed JSON body.' });
+    if (!body || typeof body !== 'object') {
+      return { ok: false, code: 'INVALID_REQUEST', message: 'Malformed request body.' };
     }
 
     const action = body.action;
     if (!action || WRITE_ACTIONS.indexOf(action) === -1) {
-      return jsonOut({ ok: false, code: 'UNKNOWN_ACTION', message: 'Unknown or missing action.' });
+      return { ok: false, code: 'UNKNOWN_ACTION', message: 'Unknown or missing action.' };
     }
 
     // (1) Pre-lock auth gate — an unauthenticated caller is turned away before it can ever
     // contend for the ScriptLock.
     if (!checkAuth_(body.authToken)) {
-      return jsonOut({ ok: false, code: 'UNAUTHORIZED', message: 'Invalid or missing auth token.' });
+      return { ok: false, code: 'UNAUTHORIZED', message: 'Invalid or missing auth token.' };
     }
 
     lock = LockService.getScriptLock();
     gotLock = lock.tryLock(10000);
     if (!gotLock) {
-      return jsonOut({ ok: false, code: 'WRITE_LOCK_TIMEOUT', message: 'Server busy, try again.' });
+      return { ok: false, code: 'WRITE_LOCK_TIMEOUT', message: 'Server busy, try again.' };
     }
 
     // (2) Post-lock re-checks — nothing from before the lock is trusted here.
     if (!checkAuth_(body.authToken)) {
-      return jsonOut({ ok: false, code: 'UNAUTHORIZED', message: 'Invalid or missing auth token.' });
+      return { ok: false, code: 'UNAUTHORIZED', message: 'Invalid or missing auth token.' };
     }
     const requestId = body.requestId;
     if (!validRequestId_(requestId)) {
-      return jsonOut({ ok: false, code: 'INVALID_REQUEST', message: 'requestId is required.' });
+      return { ok: false, code: 'INVALID_REQUEST', message: 'requestId is required.' };
     }
     const dup = findSuccessfulAuditByRequestId_(requestId);
     if (dup) {
-      return jsonOut({ ok: true, code: 'DUPLICATE_REQUEST', action: action, requestId: requestId, duplicate: true });
+      return { ok: true, code: 'DUPLICATE_REQUEST', action: action, requestId: requestId, duplicate: true };
     }
 
     if (action === 'writeSmokeTest') {
-      return jsonOut(handleWriteSmokeTest_(body, requestId));
+      return handleWriteSmokeTest_(body, requestId);
     }
 
     // saveDraft / submitEntry / confirmEntry — all KPI writes, all period-gated (re-checked here,
     // under the lock — current record/version is likewise read fresh inside writeKpiResult_).
     const v = validateKpiWriteRequest_(body);
-    if (!v.ok) return jsonOut(v);
+    if (!v.ok) return v;
     const period = assertQuarterWritable_(v.fiscalYear, v.quarter);
     if (!period.ok) {
       logPeriodBlocked_(action, v.kpiId, v.quarter, period.code, requestId, body.actorName);
-      return jsonOut({ ok: false, code: period.code, message: v.quarter + ' is not writable (' + period.code + ').' });
+      return { ok: false, code: period.code, message: v.quarter + ' is not writable (' + period.code + ').' };
     }
-    if (action === 'saveDraft') return jsonOut(handleSaveDraft_(body, requestId, v));
-    if (action === 'submitEntry') return jsonOut(handleSubmitEntry_(body, requestId, v));
-    if (action === 'confirmEntry') return jsonOut(handleConfirmEntry_(body, requestId, v));
+    if (action === 'saveDraft') return handleSaveDraft_(body, requestId, v);
+    if (action === 'submitEntry') return handleSubmitEntry_(body, requestId, v);
+    if (action === 'confirmEntry') return handleConfirmEntry_(body, requestId, v);
 
-    return jsonOut({ ok: false, code: 'UNKNOWN_ACTION', message: 'Action not implemented.' });
+    return { ok: false, code: 'UNKNOWN_ACTION', message: 'Action not implemented.' };
   } catch (err) {
     // §18/§19: never leak err.stack, secrets, or spreadsheet internals to the client.
-    return jsonOut({ ok: false, code: 'INTERNAL_ERROR', message: 'Unexpected server error.' });
+    return { ok: false, code: 'INTERNAL_ERROR', message: 'Unexpected server error.' };
   } finally {
     if (gotLock) lock.releaseLock();
   }
+}
+
+// doPost — kept as a direct write entry point alongside the bridge (Step 5B.1 §10, "Preferred"):
+// useful for server-to-server/curl diagnostics without a browser, and costs nothing extra since
+// it's a two-line wrapper around processWriteRequest_ — no logic is duplicated. The GitHub Pages
+// FRONTEND no longer calls this at all (see api_client.js) because a browser silently drops the
+// response of a cross-origin fetch() POST to this URL without an Access-Control-Allow-Origin
+// header, which Apps Script Web Apps don't add by default.
+function doPost(e) {
+  let body;
+  try {
+    body = (e && e.postData && e.postData.contents) ? JSON.parse(e.postData.contents) : {};
+  } catch (parseErr) {
+    return jsonOut({ ok: false, code: 'INVALID_REQUEST', message: 'Malformed JSON body.' });
+  }
+  return jsonOut(processWriteRequest_(body));
+}
+
+// ── Bridge RPC surface (Step 5B.1) — PUBLIC functions (no trailing _) so google.script.run can
+// call them from Bridge.html. Neither does anything processWriteRequest_/the sheets above don't
+// already do; they're just the google.script.run-callable entry points. ──
+
+// Called by Bridge.html for BRIDGE_WRITE. `body` arrives already as a plain JS object —
+// google.script.run deserializes the argument for us; no JSON.parse needed here.
+function bridgeWrite(body) {
+  return processWriteRequest_(body || {});
+}
+
+// Called by Bridge.html for BRIDGE_HEALTH — proves iframe -> google.script.run -> Apps Script ->
+// iframe works before a caller ever attempts a real write. Returns nothing sensitive: no secret,
+// no token, no spreadsheet ID, no internal error detail.
+function bridgeHealth() {
+  return { ok: true, transport: 'google.script.run', service: 'MOU69', timestamp: new Date().toISOString() };
 }
