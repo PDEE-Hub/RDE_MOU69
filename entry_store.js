@@ -9,6 +9,11 @@
 //                            confirmed value here once a human has confirmed it (brief §I).
 
 const UAT_KEY = 'mou69_uat_q3_v1';
+// Step 5A prepared naming convention for a future per-quarter store (Section 10) — NOT used by
+// any function below yet. UAT_KEY above stays the only store actually read/written in this phase;
+// the Q3 read/write path is completely unchanged. Step 5B decides for real whether Q4 gets its own
+// key (mou69_uat_q4_v1) or a nested {q3:{...},q4:{...}} shape — this just documents the former.
+function uatStoreKeyFor(quarter) { return quarter === ENTRY_ACTIVE_QUARTER ? UAT_KEY : ('mou69_uat_' + String(quarter || '').toLowerCase() + '_v1'); }
 
 function uatDefaultStore() {
   return { entries: {}, actionPlans: {}, criteriaHistory: {}, annualFrameworks: {}, investmentRaw: {}, issues: {} };
@@ -21,12 +26,12 @@ function loadUatStore() {
   } catch (e) { return uatDefaultStore(); }
 }
 function saveUatStore(store) {
-  // Step 4 choke point: this store (entries/actionPlans/criteriaHistory/annualFrameworks/
-  // investmentRaw/issues) is entirely Q3-scoped by design (see file header) — one guard here
-  // blocks every mutator in this file from persisting once Q3 is locked, with no per-call check
-  // needed. Step 5 (Q4) will need this store retargeted anyway (see priorCumulative()'s note
-  // below), not just this guard flipped.
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return;
+  // Choke point: this store (entries/actionPlans/criteriaHistory/annualFrameworks/investmentRaw/
+  // issues) is entirely Q3-scoped by design (see file header) — one guard here blocks every
+  // mutator in this file from persisting whenever Q3 isn't open for entry (it never is yet — see
+  // isQuarterOpenForEntry in entry_config.js). Step 5B (Q4) will need this store retargeted
+  // anyway (see priorCumulative()'s note below), not just this guard flipped.
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return;
   try { localStorage.setItem(UAT_KEY, JSON.stringify(store)); } catch (e) {}
 }
 
@@ -41,16 +46,18 @@ function ovrSave(o) {
   try { localStorage.setItem('mou69_v1_overrides', JSON.stringify(o)); } catch (e) {}
 }
 function ovrSet(kpiId, q, value) {
-  // Step 4 choke point: quarter-aware, so Step 5 opening Q4 only needs QUARTER_STATUS.q4
-  // flipped in entry_config.js — this guard already lets non-locked quarters through unchanged.
-  if (isQuarterLocked(q)) return;
+  // Choke point: quarter-aware — checks whichever quarter this specific write targets, so Step 5B
+  // opening Q4 only needs QUARTER_STATUS.q4 flipped to 'open' in entry_config.js, nothing here.
+  // isQuarterOpenForEntry (not isQuarterLocked) so this also blocks Q4 (not_open) and Q1/Q2
+  // (historical), not just a locked quarter — Section 12.
+  if (!isQuarterOpenForEntry(q)) return;
   const o = ovrGet();
   if (!o[kpiId]) o[kpiId] = {};
   o[kpiId][q] = value;
   ovrSave(o);
 }
 function ovrClearQuarter(kpiId, q) {
-  if (isQuarterLocked(q)) return;
+  if (!isQuarterOpenForEntry(q)) return;
   const o = ovrGet();
   if (o[kpiId]) { delete o[kpiId][q]; if (Object.keys(o[kpiId]).length === 0) delete o[kpiId]; }
   ovrSave(o);
@@ -76,30 +83,37 @@ function setIssue(kpiId, monthKey, patch) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ENTRY STATE (per-KPI leaf, Q3 only) — status/confirm bookkeeping
+// ENTRY STATE (per-KPI leaf) — status/confirm bookkeeping. `quarter` only changes which month
+// KEYS an empty shape is built with (Section 5/7) — it never changes any VALUE: every value here
+// is still null/''/[] until a human confirms it. Only ENTRY_ACTIVE_QUARTER ('q3') has a real
+// store behind it (see getEntry below); every other quarter always gets this empty shape.
 // ═══════════════════════════════════════════════════════════
-function entryDefaultFor(kpiId) {
+function entryDefaultFor(kpiId, quarter) {
   const type = ENTRY_KPI_TYPE[kpiId];
+  const monthKeys = getQuarterMonths(quarter || ENTRY_ACTIVE_QUARTER).map(m => m.key);
   if (type === 'report') return {type,status:'not_started',draftReport:{values:{},summary_text:'',evidence:'',level:null}};
   if (type === 'numeric') {
-    return { type, status: 'not_started', unit: (ENTRY_UNIT_OPTIONS[kpiId] || [{ key: 'default' }])[0].key, monthly: { m7: null, m8: null, m9: null }, confirmedAt: null, confirmedBy: null };
+    const monthly = {}; monthKeys.forEach(k => { monthly[k] = null; });
+    return { type, status: 'not_started', unit: (ENTRY_UNIT_OPTIONS[kpiId] || [{ key: 'default' }])[0].key, monthly, confirmedAt: null, confirmedBy: null };
   }
   if (type === 'investment') {
     return { type, status: 'not_started', confirmedAt: null, confirmedBy: null };
   }
-  return {
-    type: 'plan', status: 'not_started',
-    monthly: {
-      m7: { progress_text: '', reported_percent: null, obstacle_text: '', solution_text: '', evidence_links: [], submitted_at: null, submission_status: 'draft' },
-      m8: { progress_text: '', reported_percent: null, obstacle_text: '', solution_text: '', evidence_links: [], submitted_at: null, submission_status: 'draft' },
-      m9: { progress_text: '', reported_percent: null, obstacle_text: '', solution_text: '', evidence_links: [], submitted_at: null, submission_status: 'draft' },
-    },
-    adminConfirmation: null,
-  };
+  const monthly = {};
+  monthKeys.forEach(k => {
+    monthly[k] = { progress_text: '', reported_percent: null, obstacle_text: '', solution_text: '', evidence_links: [], submitted_at: null, submission_status: 'draft' };
+  });
+  return { type: 'plan', status: 'not_started', monthly, adminConfirmation: null };
 }
-function getEntry(kpiId) {
+// quarter defaults to ENTRY_ACTIVE_QUARTER (q3, unchanged behavior/store). Any other quarter has
+// no store to read yet — Section 7: "return empty/null state, never fall back to Q3" — so it
+// always returns the empty shape above, keyed with THAT quarter's own months (e.g. m10/m11/m12
+// for q4), never Q3's stored values.
+function getEntry(kpiId, quarter) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (quarter !== ENTRY_ACTIVE_QUARTER) return entryDefaultFor(kpiId, quarter);
   const store = loadUatStore();
-  return store.entries[kpiId] ? Object.assign(entryDefaultFor(kpiId), store.entries[kpiId]) : entryDefaultFor(kpiId);
+  return store.entries[kpiId] ? Object.assign(entryDefaultFor(kpiId, quarter), store.entries[kpiId]) : entryDefaultFor(kpiId, quarter);
 }
 function setEntry(kpiId, patch) {
   const store = loadUatStore();
@@ -108,11 +122,29 @@ function setEntry(kpiId, patch) {
   return store.entries[kpiId];
 }
 
+// Step 5B/5C prepared interface (Section 9) — NOT wired into any calculation or forecast yet, and
+// must not be called from a scoring path in this phase. When Q4 opens for real entry, cumulative
+// KPIs (1.1.1/1.1.2/1.4/2.1.x/2.2/2.3/2.4/2.6) will need Q3's confirmed final value as their
+// opening base — this only reads that value; it changes no score today. Read-only, defensive:
+// returns null rather than guessing when there's nothing confirmed to read.
+function getPreviousQuarterFinal(kpiId, quarter) {
+  const order = ['q1', 'q2', 'q3', 'q4'];
+  const idx = order.indexOf(String(quarter || '').toLowerCase());
+  if (idx <= 0) return null;
+  const prevQ = order[idx - 1];
+  if (prevQ !== ENTRY_ACTIVE_QUARTER) return null; // only Q3 has a real confirmed final today
+  const ov = ovrGet();
+  if (ov[kpiId] && ov[kpiId][prevQ] !== undefined) return ov[kpiId][prevQ];
+  const seeded = MOU_DATA.quarterly[kpiId] && MOU_DATA.quarterly[kpiId][prevQ];
+  return (seeded && seeded.actual !== undefined) ? seeded.actual : null;
+}
+
 // ── Numeric: monthly input, quarter/cumulative aggregation (brief §3/§4/§5 — KPI 2.4 only) ──
 // NOTE: still hardcoded to treat Q2 as "prior" because the entry form (entry.js/all_kpis.js)
 // still targets Q3 as the quarter being entered — see the Q4-entry findings reported alongside
 // this change. Once the entry form is retargeted to Q4, this must become q3 -> q2 -> q1, not
-// q2 -> q1, or a Q4 edit would double-count Q3. Left untouched this round on purpose.
+// q2 -> q1, or a Q4 edit would double-count Q3. Left untouched this round on purpose —
+// getPreviousQuarterFinal above is the prepared (but unused) building block for that later change.
 function priorCumulative(kpiId) {
   const q2 = MOU_DATA.quarterly[kpiId] && MOU_DATA.quarterly[kpiId].q2;
   if (q2 && q2.actual !== null && q2.actual !== undefined) return q2.actual;
@@ -154,8 +186,9 @@ function validateNumeric(kpiId) {
   });
   return { ok: issues.length === 0, issues, result };
 }
-function confirmNumeric(kpiId, confirmedBy) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+function confirmNumeric(kpiId, confirmedBy, quarter) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (!isQuarterOpenForEntry(quarter)) return { ok: false, code: quarterWriteBlockCode(quarter), issues: [quarterWriteBlockMessage(quarter)] };
   const v = validateNumeric(kpiId);
   if (!v.ok) return { ok: false, issues: v.issues };
   const overrideValue = v.result.cumulative; // linear scoringMethod: raw cumulative value, engine interpolates it
@@ -199,7 +232,7 @@ function getPendingAnnualFrameworkRevision(kpiId) {
   return hist.find(v => v.status === 'pending_admin_confirmation') || null;
 }
 function requestAnnualFrameworkRevision(kpiId, { newAmount, effectiveDate, reason, referenceDoc, evidenceUrl, createdBy }) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const issues = [];
   if (newAmount === null || newAmount === undefined || newAmount === '' || isNaN(Number(newAmount)) || Number(newAmount) <= 0) issues.push('กรุณากรอกกรอบเบิกจ่ายใหม่ (ล้านบาท) ให้ถูกต้อง');
   if (!effectiveDate) issues.push('บังคับกรอกวันที่มีผล');
@@ -220,7 +253,7 @@ function requestAnnualFrameworkRevision(kpiId, { newAmount, effectiveDate, reaso
   return { ok: true };
 }
 function confirmAnnualFrameworkRevision(kpiId, version, { confirmedBy }) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const store = loadUatStore();
   const hist = store.annualFrameworks[kpiId] || getAnnualFrameworkHistory(kpiId).map(v => Object.assign({}, v));
   const rev = hist.find(v => v.version === version);
@@ -234,7 +267,7 @@ function confirmAnnualFrameworkRevision(kpiId, version, { confirmedBy }) {
   return { ok: true };
 }
 function rejectAnnualFrameworkRevision(kpiId, version, { note, confirmedBy }) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const store = loadUatStore();
   const hist = store.annualFrameworks[kpiId] || getAnnualFrameworkHistory(kpiId).map(v => Object.assign({}, v));
   const rev = hist.find(v => v.version === version);
@@ -249,10 +282,18 @@ function rejectAnnualFrameworkRevision(kpiId, version, { note, confirmedBy }) {
 }
 
 // ── Raw monthly disbursement (shared by 1.1.1/1.1.2, brief §B5) ──
-function investmentRawDefault() { return { m7: { plan: null, actual: null }, m8: { plan: null, actual: null }, m9: { plan: null, actual: null } }; }
-function getInvestmentRaw() {
+function investmentRawDefault(quarter) {
+  const out = {};
+  getQuarterMonths(quarter || ENTRY_ACTIVE_QUARTER).forEach(m => { out[m.key] = { plan: null, actual: null }; });
+  return out;
+}
+// Same quarter rule as getEntry above: only ENTRY_ACTIVE_QUARTER (q3) has a real stored value;
+// any other quarter gets an empty shape keyed with that quarter's own months.
+function getInvestmentRaw(quarter) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (quarter !== ENTRY_ACTIVE_QUARTER) return investmentRawDefault(quarter);
   const store = loadUatStore();
-  return store.investmentRaw[ENTRY_INVESTMENT_KPI] || investmentRawDefault();
+  return store.investmentRaw[ENTRY_INVESTMENT_KPI] || investmentRawDefault(quarter);
 }
 function setInvestmentMonth(monthKey, field, value) {
   const store = loadUatStore();
@@ -304,8 +345,9 @@ function validateInvestment() {
   if (result.allFilled && result.q3PlanTotal === 0) issues.push('แผนเบิกจ่ายรวม Q3 เป็น 0 — ไม่สามารถคำนวณ 1.1.2 ได้ กรุณาตรวจสอบ');
   return { ok: issues.length === 0, issues, result };
 }
-function confirmInvestment(confirmedBy) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+function confirmInvestment(confirmedBy, quarter) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (!isQuarterOpenForEntry(quarter)) return { ok: false, code: quarterWriteBlockCode(quarter), issues: [quarterWriteBlockMessage(quarter)] };
   const v = validateInvestment();
   if (!v.ok) return { ok: false, issues: v.issues };
   ovrSet('1.1.1', 'q3', v.result.pct111);
@@ -351,8 +393,9 @@ function validatePlanMonth(kpiId, monthKey) {
   else if (m.reported_percent < 0 || m.reported_percent > 100) issues.push('ผลการดำเนินงาน (%) ต้องอยู่ระหว่าง 0-100');
   return { ok: issues.length === 0, issues };
 }
-function submitPlanMonth(kpiId, monthKey) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+function submitPlanMonth(kpiId, monthKey, quarter) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (!isQuarterOpenForEntry(quarter)) return { ok: false, code: quarterWriteBlockCode(quarter), issues: [quarterWriteBlockMessage(quarter)] };
   const v = validatePlanMonth(kpiId, monthKey);
   if (!v.ok) return { ok: false, issues: v.issues };
   const entry = getEntry(kpiId);
@@ -361,8 +404,9 @@ function submitPlanMonth(kpiId, monthKey) {
   setEntry(kpiId, entry);
   return { ok: true };
 }
-function sendBackPlanMonth(kpiId, monthKey, note) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+function sendBackPlanMonth(kpiId, monthKey, note, quarter) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (!isQuarterOpenForEntry(quarter)) return { ok: false, code: quarterWriteBlockCode(quarter), issues: [quarterWriteBlockMessage(quarter)] };
   const entry = getEntry(kpiId);
   const m = entry.monthly[monthKey];
   if (!m || m.submission_status !== 'pending_confirmation') return { ok: false, issues: ['รายการนี้ไม่ได้อยู่ในสถานะรอยืนยัน'] };
@@ -465,8 +509,9 @@ function listPendingFrameworkRevisions() {
   });
   return out;
 }
-function confirmPlanMonth(kpiId, monthKey, { confirmedPercent, confirmationNote, confirmedLevel, confirmedBy }) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+function confirmPlanMonth(kpiId, monthKey, { confirmedPercent, confirmationNote, confirmedLevel, confirmedBy, quarter }) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (!isQuarterOpenForEntry(quarter)) return { ok: false, code: quarterWriteBlockCode(quarter), issues: [quarterWriteBlockMessage(quarter)] };
   const kpi = MOU_DATA.kpis[kpiId];
   const entry = getEntry(kpiId);
   const m = entry.monthly[monthKey];
@@ -536,7 +581,7 @@ function getActionPlan(kpiId) {
 }
 // First-time creation only (no baseline yet) — e.g. a project not in Master, or a manual add.
 function createBaselineActionPlan(kpiId, activities) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const store = loadUatStore();
   const existing = store.actionPlans[kpiId] || actionPlanDefault(kpiId);
   if (existing.baseline) return { ok: false, issues: ['มี Baseline Plan อยู่แล้ว ห้ามเขียนทับ — ใช้ขอปรับแผนแทน'] };
@@ -549,7 +594,7 @@ function createBaselineActionPlan(kpiId, activities) {
 }
 // Revision — baseline never overwritten (brief §C4). Requires a reason; evidence optional but recommended.
 function requestActionPlanRevision(kpiId, activities, { reason, evidenceUrl, revisedBy }) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const issues = [];
   if (!reason || !reason.trim()) issues.push('บังคับกรอกเหตุผลในการปรับแผน');
   if (!Array.isArray(activities) || !activities.length) issues.push('กรุณากรอกกิจกรรมอย่างน้อย 1 รายการ');
@@ -654,7 +699,7 @@ function getEffectiveKpi(kpiId) {
   return Object.assign({}, kpi, { thresholds: active.thresholds, criteriaRevisionNote: active.note, criteriaBoardApprovalDate: active.boardApprovalDate });
 }
 function addCriteriaRevision(kpiId, { newThresholds, boardApprovalDate, note, evidenceUrl }) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const issues = [];
   if (!Array.isArray(newThresholds) || newThresholds.length !== 5 || newThresholds.some(v => v === null || v === '' || isNaN(Number(v)))) issues.push('กรุณากรอกเกณฑ์ Level 1-5 ให้ครบและเป็นตัวเลข');
   if (!boardApprovalDate) issues.push('บังคับกรอกวันที่คณะกรรมการ กทท. เห็นชอบ');
@@ -768,7 +813,7 @@ function pilotProgressCount() {
 // audit trail beyond the versions created during this UAT session.
 // ═══════════════════════════════════════════════════════════
 function resetQ3UatData() {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const store = loadUatStore();
   store.entries = {};
   store.investmentRaw = {};
@@ -909,7 +954,7 @@ function uatImportData(payload) {
   // Step 4 §8: Export stays available; Import must never be able to overwrite the Q3 Final
   // Snapshot. Both transfer keys (mou69_uat_q3_v1, mou69_v1_overrides) are 100% Q3-scoped in
   // this app today, so a full block here (not a partial per-record filter) is the correct fix.
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+  if (!isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: quarterWriteBlockCode(ENTRY_ACTIVE_QUARTER), issues: [quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER)] };
   const validation = uatValidateImportPayload(payload);
   if (!validation.ok) return validation;
 

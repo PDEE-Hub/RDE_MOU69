@@ -5,12 +5,6 @@
 
 const ENTRY_PILOT_IDS = ['1.1','1.2','1.3','1.4','2.1','2.2','2.3','2.4','2.5','2.6','2.7','2.8'];
 
-const ENTRY_Q3_MONTHS = [
-  { key: 'm7', label: 'เมษายน 2569' },
-  { key: 'm8', label: 'พฤษภาคม 2569' },
-  { key: 'm9', label: 'มิถุนายน 2569' },
-];
-
 // Full fiscal year, m1-m12 — same numbering already used by DTL_MONTH_LABEL/monthly data (m1=ต.ค.).
 // Used only by the Action Plan annual strip (brief "ACTION PLAN MONTHLY VIEW"). Only Q3 (m7-m9)
 // is the live UAT reporting quarter; Q1/Q2/Q4 have no per-month Action Plan data in Master and are
@@ -24,21 +18,57 @@ const ENTRY_FISCAL_MONTHS = [
 const ENTRY_FISCAL_QUARTER_LABEL = { q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4' };
 
 // ═══════════════════════════════════════════════════════════
-// QUARTER LOCK STATE (Step 4: LOCK Q3 FINAL) — single source of truth for read/write gating.
-// Q1/Q2 = historical (already read-only — seeded from MOU_DATA.quarterly, never routed through
-// this entry system at all). Q3 = locked/final (Q3 Final Snapshot is confirmed in MOU69_DB — no
-// further edits allowed from here). Q4 = not_open (Step 5 — not this round).
-// Every write path in entry_store.js / all_kpis.js must check isQuarterLocked() from here —
-// never hardcode `quarter === 'q3'` / `'Q3'` scattered across files.
+// QUARTER CONFIG (Step 5A: quarter-driven Entry architecture) — single source of truth for both
+// (a) which fiscal months belong to which quarter/label, and (b) read/write status per quarter.
+// Q3's months/labels here are IDENTICAL to the old ENTRY_Q3_MONTHS (see getQuarterMonths('q3')
+// below, which derives it) — the Q3 → m7/m8/m9 mapping is NOT changed by this refactor.
+//
+// QUARTER_STATUS values: 'historical' (Q1/Q2, read-only — never routed through this entry system
+// at all), 'locked' (Q3 — Final Snapshot confirmed in MOU69_DB, no further edits), 'not_open'
+// (Q4 — Step 5A prepares the architecture only; Step 5B opens it for real via a central write
+// API), 'open' (none yet — this is what Step 5B flips for Q4).
 // ═══════════════════════════════════════════════════════════
 const QUARTER_STATUS = { q1: 'historical', q2: 'historical', q3: 'locked', q4: 'not_open' };
-function isQuarterLocked(quarter) { return QUARTER_STATUS[String(quarter || '').toLowerCase()] === 'locked'; }
-// The only quarter this entry form currently reports against (see ENTRY_Q3_MONTHS above) — there
-// is no quarter switcher in this UI yet, so locking this one constant locks the whole "กรอกข้อมูล"
-// write surface. Step 5 (open Q4) needs a real quarter-switch in entry.js, not just a flip here.
+const QUARTER_CONFIG = {
+  q1: { label: 'Q1', months: ['m1', 'm2', 'm3'], monthLabels: ['ตุลาคม 2568', 'พฤศจิกายน 2568', 'ธันวาคม 2568'] },
+  q2: { label: 'Q2', months: ['m4', 'm5', 'm6'], monthLabels: ['มกราคม 2569', 'กุมภาพันธ์ 2569', 'มีนาคม 2569'] },
+  q3: { label: 'Q3', months: ['m7', 'm8', 'm9'], monthLabels: ['เมษายน 2569', 'พฤษภาคม 2569', 'มิถุนายน 2569'] },
+  q4: { label: 'Q4', months: ['m10', 'm11', 'm12'], monthLabels: ['กรกฎาคม 2569', 'สิงหาคม 2569', 'กันยายน 2569'] },
+};
+function getQuarterConfig(quarter) { return QUARTER_CONFIG[String(quarter || '').toLowerCase()] || null; }
+// Same {key,label} shape the old ENTRY_Q3_MONTHS used, for any quarter — the render loops in
+// entry.js call this instead of hardcoding ENTRY_Q3_MONTHS, so one component renders every quarter.
+function getQuarterMonths(quarter) {
+  const c = getQuarterConfig(quarter);
+  if (!c) return [];
+  return c.months.map((key, i) => ({ key, label: c.monthLabels[i] }));
+}
+function getQuarterStatus(quarter) { return QUARTER_STATUS[String(quarter || '').toLowerCase()] || null; }
+function isQuarterLocked(quarter) { return getQuarterStatus(quarter) === 'locked'; }
+function isQuarterOpenForEntry(quarter) { return getQuarterStatus(quarter) === 'open'; }
+// Every quarter in QUARTER_STATUS can be selected/viewed in the switcher — none are hidden.
+function isQuarterReadable(quarter) { return !!getQuarterStatus(quarter); }
+
+// Write-block code/message per quarter status (Section 12) — Q3 is blocked because it's locked,
+// Q4 because it isn't open yet, Q1/Q2 because they're historical; each gets its own code so a
+// caller (or a console bypass attempt) can tell WHY, not just that it failed.
+const QUARTER_BLOCK_CODE = { locked: 'QUARTER_LOCKED', not_open: 'QUARTER_NOT_OPEN', historical: 'QUARTER_READ_ONLY' };
+function quarterWriteBlockCode(quarter) { return QUARTER_BLOCK_CODE[getQuarterStatus(quarter)] || 'QUARTER_LOCKED'; }
+const QUARTER_BLOCK_MESSAGE = {
+  QUARTER_LOCKED: 'Q3 ปิดรับข้อมูลแล้ว · Final — ข้อมูลไตรมาส 3 ได้รับการยืนยันและล็อกแล้ว สามารถดูข้อมูลได้อย่างเดียว',
+  QUARTER_NOT_OPEN: 'Q4 ยังไม่เปิดรับข้อมูล — ระบบอยู่ระหว่างเตรียมการเปิดรับผลการดำเนินงาน เดือนกรกฎาคม–กันยายน 2569',
+  QUARTER_READ_ONLY: 'ไตรมาสนี้เป็นข้อมูลย้อนหลัง (Read-only) สามารถดูข้อมูลได้อย่างเดียว',
+};
+function quarterWriteBlockMessage(quarter) { return QUARTER_BLOCK_MESSAGE[quarterWriteBlockCode(quarter)]; }
+
+// The only quarter with a real, confirmed data store today (mou69_uat_q3_v1) — every read/write
+// function in entry_store.js still ultimately keys off this constant, not a hardcoded 'q3' string.
+// entryState.selectedQuarter (entry.js) is the UI-level "which quarter am I viewing" and defaults
+// to this; it must NOT be changed to 'q4' by this step (Section 3 — Q4 stays not_open).
 const ENTRY_ACTIVE_QUARTER = 'q3';
+const ENTRY_Q3_MONTHS = getQuarterMonths('q3'); // kept for entry_store.js's scoring/aggregation internals (Section 9 — must not change)
 const ENTRY_LOCKED = isQuarterLocked(ENTRY_ACTIVE_QUARTER);
-const ENTRY_LOCK_MESSAGE = 'Q3 ปิดรับข้อมูลแล้ว · Final — ข้อมูลไตรมาส 3 ได้รับการยืนยันและล็อกแล้ว สามารถดูข้อมูลได้อย่างเดียว';
+const ENTRY_LOCK_MESSAGE = QUARTER_BLOCK_MESSAGE.QUARTER_LOCKED;
 const ENTRY_LOCK_TOOLTIP = 'Q3 ปิดรับข้อมูลแล้ว — ล็อกเป็น Final ไม่สามารถแก้ไขได้';
 
 // kpiType per brief §1: only two Thai-facing types. Parent/Child is structure, not type.

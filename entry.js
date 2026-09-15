@@ -10,9 +10,26 @@ const entryState = {
   criteriaKpi: '2.4',
   showFrameworkForm: false,
   showApRevisionFor: null,
+  // Step 5A: which quarter the "กรอกข้อมูล" page is showing — defaults to (and today can only
+  // ever meaningfully be) ENTRY_ACTIVE_QUARTER ('q3', the only quarter with a real store). The
+  // switcher (entryQuarterSwitcherHtml) lets a user preview Q1/Q2/Q4 read-only; it never becomes
+  // the active quarter for scoring/writes — see entrySelectQuarter below.
+  selectedQuarter: ENTRY_ACTIVE_QUARTER,
   activePlanMonth: 'm7',
   planExpandQuarter: 'q3',
 };
+
+// Section 3/6: switching the previewed quarter also resets the plan-KPI active month to that
+// quarter's first month (never leaves e.g. Q4 selected while still showing an m7 tab) and, for
+// the annual Action Plan strip, auto-expands that same quarter's row. Never touches entry data.
+function entrySelectQuarter(q) {
+  if (!isQuarterReadable(q)) return;
+  entryState.selectedQuarter = q;
+  const months = getQuarterMonths(q);
+  entryState.activePlanMonth = months.length ? months[0].key : null;
+  entryState.planExpandQuarter = q;
+  renderEntry();
+}
 
 const ENTRY_STATUS_ICON = { not_started: '○', pending: '◐', confirmed: '✓', needs_review: '!' };
 const ENTRY_STATUS_TITLE = { not_started: 'ยังไม่กรอก', pending: 'รอยืนยัน', confirmed: 'ยืนยันแล้ว', needs_review: 'ต้องตรวจสอบ' };
@@ -100,24 +117,52 @@ function entryHandleImportUat(file) {
 // ═══════════════════════════════════════════════════════════
 function entryPendingTotal() { return listPendingConfirmations().length + listPendingFrameworkRevisions().length; }
 function entryLockedBannerHtml() {
-  if (!ENTRY_LOCKED) return '';
-  return `<div class="entry-locked-banner"><span class="entry-locked-dot">●</span> ${entryEsc(ENTRY_LOCK_MESSAGE)}</div>`;
+  const q = entryState.selectedQuarter;
+  if (isQuarterOpenForEntry(q)) return '';
+  return `<div class="entry-locked-banner"><span class="entry-locked-dot">●</span> ${entryEsc(quarterWriteBlockMessage(q))}</div>`;
+}
+// Section 4 — Q1|Q2|Q3|Q4 switcher. Q1/Q2 show "ย้อนหลัง", Q3 shows "Final" with a lock glyph,
+// Q4 shows "ยังไม่เปิด". Every quarter is clickable (read/preview only — Section 4 explicitly
+// allows clicking Q4 to preview structure); entrySelectQuarter never enables writing anywhere.
+function entryQuarterStatusLabel(q) {
+  const st = getQuarterStatus(q);
+  if (st === 'locked') return 'Final 🔒';
+  if (st === 'not_open') return 'ยังไม่เปิด';
+  if (st === 'historical') return 'ย้อนหลัง';
+  return '';
+}
+function entryQuarterSwitcherHtml() {
+  const sel = entryState.selectedQuarter;
+  return `<div class="entry-quarter-switcher">
+    ${['q1','q2','q3','q4'].map(q => {
+      const cfg = getQuarterConfig(q);
+      const st = getQuarterStatus(q);
+      return `<button class="entry-qsw-btn st-${st} ${sel === q ? 'active' : ''}" onclick="entrySelectQuarter('${q}')">
+        <span class="entry-qsw-label">${cfg.label}</span>
+        <span class="entry-qsw-status">${entryQuarterStatusLabel(q)}</span>
+      </button>`;
+    }).join('')}
+  </div>`;
 }
 function entryHeaderHtml() {
   const count = pilotProgressCount();
+  const q = entryState.selectedQuarter;
+  const qCfg = getQuarterConfig(q) || getQuarterConfig(ENTRY_ACTIVE_QUARTER);
+  const openForEntry = isQuarterOpenForEntry(q);
+  const importBlocked = !isQuarterOpenForEntry(ENTRY_ACTIVE_QUARTER); // Import always targets the Q3 UAT store — Section 8
   return `
     <div class="entry-header-card">
       <div class="entry-header-row">
         <div>
-          <div class="dtl-page-title">กรอกผลการดำเนินงาน Q3</div>
-          <div class="entry-header-sub">เมษายน – มิถุนายน 2569 &nbsp;·&nbsp; สถานะ: <b>${ENTRY_LOCKED ? 'ปิดรับข้อมูลแล้ว (Locked)' : 'ทดสอบระบบ (UAT)'}</b></div>
+          <div class="dtl-page-title">กรอกผลการดำเนินงาน ${qCfg.label}</div>
+          <div class="entry-header-sub">${qCfg.monthLabels[0]} – ${qCfg.monthLabels[qCfg.monthLabels.length - 1]} &nbsp;·&nbsp; สถานะ: <b>${openForEntry ? 'ทดสอบระบบ (UAT)' : entryQuarterStatusLabel(q)}</b></div>
         </div>
         <div class="entry-header-right">
           <div class="entry-progress-badge">${count} / ${ENTRY_PILOT_IDS.length} <span>ยืนยันแล้ว</span></div>
           <div class="entry-data-tools" title="สำรองและถ่ายโอนข้อมูล UAT ระหว่างเครื่อง">
             <button class="entry-data-btn" type="button" onclick="entryExportUatData()">ส่งออก UAT Data</button>
-            <button class="entry-data-btn" type="button" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryOpenImportUat()">นำเข้า UAT Data</button>
-            <input id="entryUatImportFile" type="file" accept=".json,application/json" ${ENTRY_LOCKED ? 'disabled' : ''} style="display:none" onchange="entryHandleImportUat(this.files && this.files[0])">
+            <button class="entry-data-btn" type="button" ${importBlocked ? 'disabled' : ''} title="${importBlocked ? quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER) : ''}" onclick="entryOpenImportUat()">นำเข้า UAT Data</button>
+            <input id="entryUatImportFile" type="file" accept=".json,application/json" ${importBlocked ? 'disabled' : ''} style="display:none" onchange="entryHandleImportUat(this.files && this.files[0])">
           </div>
           <div class="entry-role-toggle">
             <button class="${entryState.role === 'owner' ? 'active' : ''}" onclick="entrySetRole('owner')">ผู้รับผิดชอบ KPI</button>
@@ -125,13 +170,14 @@ function entryHeaderHtml() {
           </div>
         </div>
       </div>
+      ${entryQuarterSwitcherHtml()}
       ${entryLockedBannerHtml()}
       ${entryState.role === 'admin' ? `
       <div class="entry-subnav">
         <button class="${entryState.view === 'form' ? 'active' : ''}" onclick="entrySetView('form')">กรอกข้อมูล</button>
         <button class="${entryState.view === 'confirm' ? 'active' : ''}" onclick="entrySetView('confirm')">ยืนยันข้อมูล (รอยืนยัน: ${entryPendingTotal()})</button>
         <button class="${entryState.view === 'criteria' ? 'active' : ''}" onclick="entrySetView('criteria')">จัดการเกณฑ์ MOU</button>
-        <button class="entry-reset-btn" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryDoReset()">🗑 รีเซ็ตข้อมูลทดสอบ Q3</button>
+        <button class="entry-reset-btn" ${importBlocked ? 'disabled' : ''} title="${importBlocked ? quarterWriteBlockMessage(ENTRY_ACTIVE_QUARTER) : ''}" onclick="entryDoReset()">🗑 รีเซ็ตข้อมูลทดสอบ Q3</button>
       </div>` : ''}
     </div>
   `;
@@ -196,9 +242,9 @@ function entryLeftListHtml() {
 // ISSUES (ปัญหา/อุปสรรค + แนวทางแก้ไข) — optional, brief §F. Quarter-level for numeric/investment
 // (no per-KPI mockup asked for per-month capture on 1.1/2.4); per-month for plan (§C6 explicit).
 // ═══════════════════════════════════════════════════════════
-function entryIssueBlockHtml(kpiId, monthKey, idPrefix) {
+function entryIssueBlockHtml(kpiId, monthKey, idPrefix, quarter) {
   const issue = getIssue(kpiId, monthKey);
-  const ro = ENTRY_LOCKED ? 'disabled' : '';
+  const ro = isQuarterOpenForEntry(quarter || entryState.selectedQuarter) ? '' : 'disabled';
   return `<div class="entry-issue-block">
     <div class="entry-field-row col"><label>ปัญหา / อุปสรรค (ถ้ามี)</label>
       <textarea class="entry-input" rows="2" id="${idPrefix}_obstacle" ${ro} oninput="entryOnIssueInput('${kpiId}','${monthKey}','obstacle_text',this.value)" placeholder="ไม่บังคับกรอก">${entryEsc(issue.obstacle_text)}</textarea>
@@ -214,13 +260,17 @@ function entryOnIssueInput(kpiId, monthKey, field, val) { setIssue(kpiId, monthK
 // NUMERIC FORM — KPI 2.4 only (brief §3/§4/§5; unchanged by v1.2)
 // ═══════════════════════════════════════════════════════════
 function entryNumericFormHtml(kpiId) {
-  const entry = getEntry(kpiId);
+  const q = entryState.selectedQuarter;
+  const qLabel = getQuarterConfig(q)?.label || 'Q3';
+  const entry = getEntry(kpiId, q);
   const units = ENTRY_UNIT_OPTIONS[kpiId];
   const unitKey = entry.unit || (units ? units[0].key : 'default');
   const unitFactor = units ? (units.find(u => u.key === unitKey) || units[0]).factor : 1;
-  const ro = ENTRY_LOCKED ? 'disabled' : '';
+  const openForEntry = isQuarterOpenForEntry(q);
+  const ro = openForEntry ? '' : 'disabled';
+  const tip = openForEntry ? '' : quarterWriteBlockMessage(q);
 
-  const rows = ENTRY_Q3_MONTHS.map(m => {
+  const rows = getQuarterMonths(q).map(m => {
     const norm = entry.monthly[m.key];
     const display = (norm === null || norm === undefined) ? '' : (norm / unitFactor);
     return `<div class="entry-field-row">
@@ -243,15 +293,15 @@ function entryNumericFormHtml(kpiId) {
       <div class="entry-meta-line">หน่วยหลัก (Master): <b>${MOU_DATA.kpis[kpiId].unit || '—'}</b> &nbsp;·&nbsp; น้ำหนัก ${MOU_DATA.kpis[kpiId].weight}%</div>
       ${unitSelector}
       ${rows}
-      <div class="entry-field-row col"><label>สรุปผลการดำเนินงาน Q3</label>
+      <div class="entry-field-row col"><label>สรุปผลการดำเนินงาน ${qLabel}</label>
         <textarea class="entry-input" rows="3" ${ro} oninput="setEntry('${kpiId}', {summary_text:this.value,status:'draft'})" placeholder="อธิบายผลการดำเนินงาน สาเหตุ หรือประเด็นสำคัญ">${entryEsc(entry.summary_text || '')}</textarea>
       </div>
-      ${entryIssueBlockHtml(kpiId, 'q3', 'iss_' + kpiId)}
+      ${entryIssueBlockHtml(kpiId, q, 'iss_' + kpiId)}
       <div class="entry-note-small">เมื่อยืนยันบันทึก ระบบจะส่งผลสะสม คะแนน และข้อความชุดเดียวกันไปยังหน้ารายละเอียด ภาพรวม และ Home · การแก้ไขร่างจะยังไม่แทนผลที่ยืนยันครั้งล่าสุด</div>
       <div class="entry-btn-row">
         <button class="entry-btn ghost" ${ro} onclick="entrySaveDraft('${kpiId}')">บันทึกร่าง</button>
         <button class="entry-btn secondary" ${ro} onclick="entryValidate('${kpiId}')">ตรวจสอบข้อมูล</button>
-        <button class="entry-btn primary" ${ro} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryConfirmNumeric('${kpiId}')">ยืนยันบันทึก</button>
+        <button class="entry-btn primary" ${ro} title="${tip}" onclick="entryConfirmNumeric('${kpiId}')">ยืนยันบันทึก</button>
       </div>
       <div id="entryValidationBox_${kpiId}"></div>
     </div>
@@ -277,8 +327,8 @@ function entryValidate(kpiId) {
   }
 }
 function entryConfirmNumeric(kpiId) {
-  const r = confirmNumeric(kpiId, 'ผู้รับผิดชอบ KPI (UAT)');
-  if (!r.ok) { entryValidate(kpiId); entryToast('ยังยืนยันไม่ได้ — ตรวจสอบข้อมูลอีกครั้ง'); return; }
+  const r = confirmNumeric(kpiId, 'ผู้รับผิดชอบ KPI (UAT)', entryState.selectedQuarter);
+  if (!r.ok) { entryValidate(kpiId); entryToast(r.issues ? r.issues[0] : 'ยังยืนยันไม่ได้ — ตรวจสอบข้อมูลอีกครั้ง'); return; }
   entryToast('ยืนยันบันทึก Q3 แล้ว — ผล คะแนน และข้อความเชื่อมไปยังรายละเอียด ภาพรวม และ Home');
   if (typeof renderDetail === 'function') renderDetail();
   if (typeof renderOverview === 'function') renderOverview();
@@ -314,7 +364,7 @@ function entryAnnualFrameworkPanel() {
       ${active.sourceNote ? `<div class="entry-framework-source">${entryEsc(active.sourceNote)}</div>` : ''}
       ${pending
         ? `<div class="entry-todo-note">⏳ มีคำขอปรับกรอบเป็น <b>${Number(pending.amount).toLocaleString('en-US', { maximumFractionDigits: 3 })} ล้านบาท</b> (มีผลตั้งแต่ ${entryThaiDate(pending.effectiveDate)}) — รอผู้ดูแลระบบยืนยัน</div>`
-        : `<div class="entry-btn-row"><button class="entry-btn ghost small" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryToggleFrameworkForm()">${entryState.showFrameworkForm ? 'ยกเลิก' : 'แจ้งปรับกรอบเบิกจ่าย'}</button></div>`}
+        : `<div class="entry-btn-row"><button class="entry-btn ghost small" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_MESSAGE : ''}" onclick="entryToggleFrameworkForm()">${entryState.showFrameworkForm ? 'ยกเลิก' : 'แจ้งปรับกรอบเบิกจ่าย'}</button></div>`}
       <div id="entryFrameworkRevisionForm">${(entryState.showFrameworkForm && !pending) ? entryFrameworkRevisionFormHtml(active) : ''}</div>
       ${hist.length > 1 ? `<details class="entry-framework-history"><summary>ประวัติเวอร์ชัน (${hist.length})</summary>
         <table class="dtl-qtable"><thead><tr><th>เวอร์ชัน</th><th>จำนวน (ล้านบาท)</th><th>มีผลตั้งแต่</th><th>สถานะ</th><th>เหตุผล / หมายเหตุ</th><th>เอกสาร</th></tr></thead>
@@ -361,11 +411,13 @@ function entrySubmitFrameworkRevision() {
 
 function entryInvestmentFormHtml() {
   const kpiId = ENTRY_INVESTMENT_KPI;
-  const raw = getInvestmentRaw();
-  const result = computeInvestmentResult();
-  const ro = ENTRY_LOCKED ? 'disabled' : '';
+  const q = entryState.selectedQuarter;
+  const raw = getInvestmentRaw(q);
+  const openForEntry = isQuarterOpenForEntry(q);
+  const ro = openForEntry ? '' : 'disabled';
+  const tip = openForEntry ? '' : quarterWriteBlockMessage(q);
 
-  const rows = ENTRY_Q3_MONTHS.map(m => `
+  const rows = getQuarterMonths(q).map(m => `
     <tr>
       <td>${m.label}</td>
       <td><input type="number" step="any" class="entry-input" value="${raw[m.key].plan ?? ''}" placeholder="ล้านบาท" ${ro} oninput="entryOnInvestmentInput('${m.key}','plan',this.value)"></td>
@@ -381,11 +433,11 @@ function entryInvestmentFormHtml() {
         <thead><tr><th>เดือน</th><th>แผนเบิกจ่ายเดือนนี้ (ล้านบาท)</th><th>เบิกจ่ายจริงเดือนนี้ (ล้านบาท)</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      ${entryIssueBlockHtml(kpiId, 'q3', 'iss_' + kpiId)}
+      ${entryIssueBlockHtml(kpiId, q, 'iss_' + kpiId)}
       <div class="entry-btn-row">
         <button class="entry-btn ghost" ${ro} onclick="entrySaveDraft()">บันทึกร่าง</button>
         <button class="entry-btn secondary" ${ro} onclick="entryValidateInvestment()">ตรวจสอบข้อมูล</button>
-        <button class="entry-btn primary" ${ro} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryConfirmInvestment()">ยืนยันบันทึก</button>
+        <button class="entry-btn primary" ${ro} title="${tip}" onclick="entryConfirmInvestment()">ยืนยันบันทึก</button>
       </div>
       <div id="entryValidationBox_1.1"></div>
     </div>
@@ -401,8 +453,8 @@ function entryValidateInvestment() {
   if (box) box.innerHTML = `<div class="entry-validate-box ${v.ok ? 'ok' : 'bad'}">${v.ok ? '✓ ข้อมูลครบถ้วน พร้อมยืนยันบันทึก' : v.issues.map(i => `⚠ ${entryEsc(i)}`).join('<br>')}</div>`;
 }
 function entryConfirmInvestment() {
-  const r = confirmInvestment('ผู้รับผิดชอบ KPI (UAT)');
-  if (!r.ok) { entryValidateInvestment(); entryToast('ยังยืนยันไม่ได้ — ตรวจสอบข้อมูลอีกครั้ง'); return; }
+  const r = confirmInvestment('ผู้รับผิดชอบ KPI (UAT)', entryState.selectedQuarter);
+  if (!r.ok) { entryValidateInvestment(); entryToast(r.issues ? r.issues[0] : 'ยังยืนยันไม่ได้ — ตรวจสอบข้อมูลอีกครั้ง'); return; }
   entryToast('ยืนยันบันทึก Q3 เรียบร้อย — คำนวณ 1.1.1/1.1.2 และ Parent 1.1 แล้ว');
   renderEntry();
   if (typeof renderHome === 'function') renderHome();
@@ -447,7 +499,7 @@ function entryAnnualStripHtml(kpiId, monthly) {
       const hasData = months.some(m => monthly[m.key].planned_percent !== null);
       return `<div class="entry-plan-qgroup ${open ? 'open' : ''}">
         <button class="entry-plan-qhead" onclick="entryTogglePlanQuarter('${q}')">
-          <span class="entry-plan-qlabel">${ENTRY_FISCAL_QUARTER_LABEL[q]}${q === 'q3' ? ' (ปัจจุบัน)' : ''}</span>
+          <span class="entry-plan-qlabel">${ENTRY_FISCAL_QUARTER_LABEL[q]}${q === ENTRY_ACTIVE_QUARTER ? ' (ปัจจุบัน)' : ''}</span>
           <span class="entry-plan-qmonths">${months.map(m => {
             const mm = monthly[m.key];
             return `<span class="entry-plan-mchip ${mm.planned_percent !== null ? 'has-data' : ''} ${mm.baseline_or_revised === 'revised' ? 'revised' : ''}">${m.label}${mm.planned_percent !== null ? ` · ${mm.planned_percent}%` : ''}</span>`;
@@ -466,7 +518,7 @@ function entryActionPlanBlockHtml(kpiId) {
   }
   const activities = plan.revised || plan.baseline;
   const monthly = getActionPlanMonthly(kpiId);
-  if (entryState.planExpandQuarter === undefined) entryState.planExpandQuarter = 'q3';
+  if (entryState.planExpandQuarter === undefined) entryState.planExpandQuarter = ENTRY_ACTIVE_QUARTER;
 
   const fullLadderRows = activities.map(a => {
     const pct = a.expected_progress_percent;
@@ -490,7 +542,7 @@ function entryActionPlanBlockHtml(kpiId) {
         <table class="dtl-qtable"><thead><tr><th>ปรับเมื่อ</th><th>เหตุผล</th></tr></thead>
         <tbody>${plan.revisionHistory.map(h => `<tr><td>${entryThaiDate(h.revisedAt ? h.revisedAt.slice(0, 10) : null)}</td><td>${entryEsc(h.reason || '')}</td></tr>`).join('')}</tbody></table>
       </details>` : ''}
-      <div class="entry-btn-row"><button class="entry-btn ghost small" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryToggleApRevisionForm('${kpiId}')">${entryState.showApRevisionFor === kpiId ? 'ยกเลิก' : 'ขอปรับแผนการดำเนินงาน'}</button></div>
+      <div class="entry-btn-row"><button class="entry-btn ghost small" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_MESSAGE : ''}" onclick="entryToggleApRevisionForm('${kpiId}')">${entryState.showApRevisionFor === kpiId ? 'ยกเลิก' : 'ขอปรับแผนการดำเนินงาน'}</button></div>
       <div id="entryApRevisionForm_${kpiId}">${entryState.showApRevisionFor === kpiId ? entryActionPlanRevisionFormHtml(kpiId, activities) : ''}</div>
     </div>
   `;
@@ -525,9 +577,11 @@ function entrySubmitApRevision(kpiId) {
 }
 
 function entryPlanFormHtml(kpiId) {
+  const q = entryState.selectedQuarter;
   const projects = entryProjectLeaves();
-  const entry = getEntry(kpiId);
-  const activeMonth = entryState.activePlanMonth || 'm7';
+  const entry = getEntry(kpiId, q);
+  const qMonths = getQuarterMonths(q);
+  const activeMonth = entryState.activePlanMonth || (qMonths[0] && qMonths[0].key);
 
   const projectPills = projects.map(p => {
     const icon = leafStatusIcon(p.id);
@@ -536,11 +590,12 @@ function entryPlanFormHtml(kpiId) {
     </button>`;
   }).join('');
 
-  const monthTabs = ENTRY_Q3_MONTHS.map(m => `<button class="dtl-qbtn ${activeMonth === m.key ? 'active' : ''}" onclick="entrySetPlanMonth('${m.key}')">${m.label}</button>`).join('');
-  const monthPlan = getActionPlanMonthly(kpiId)[activeMonth];
+  const monthTabs = qMonths.map(m => `<button class="dtl-qbtn ${activeMonth === m.key ? 'active' : ''}" onclick="entrySetPlanMonth('${m.key}')">${m.label}</button>`).join('');
+  const monthPlan = getActionPlanMonthly(kpiId)[activeMonth] || { planned_activity: null, planned_percent: null };
 
-  const m = entry.monthly[activeMonth];
-  const locked = ENTRY_LOCKED || m.submission_status !== 'draft';
+  const m = entry.monthly[activeMonth] || { progress_text: '', reported_percent: null, obstacle_text: '', solution_text: '', evidence_links: [], submitted_at: null, submission_status: 'draft' };
+  const locked = !isQuarterOpenForEntry(q) || m.submission_status !== 'draft';
+  const lockTip = isQuarterOpenForEntry(q) ? '' : quarterWriteBlockMessage(q);
   const suggestion = suggestForPlanKpi(kpiId, m.progress_text, m.reported_percent);
 
   const evidenceList = m.evidence_links.length
@@ -602,8 +657,8 @@ function entryPlanFormHtml(kpiId) {
       <div class="entry-plan-status">สถานะ: <b>${entryPlanStatusLabel(m.submission_status)}</b>${m.submitted_at ? ` · ส่งเมื่อ ${new Date(m.submitted_at).toLocaleString('th-TH')}` : ''}</div>
 
       <div class="entry-btn-row">
-        <button class="entry-btn ghost" ${locked ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entrySaveDraft()">บันทึกร่าง</button>
-        <button class="entry-btn primary" ${locked ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entrySubmitPlan('${kpiId}','${activeMonth}')">ส่งข้อมูล (Submit)</button>
+        <button class="entry-btn ghost" ${locked ? 'disabled' : ''} title="${lockTip}" onclick="entrySaveDraft()">บันทึกร่าง</button>
+        <button class="entry-btn primary" ${locked ? 'disabled' : ''} title="${lockTip}" onclick="entrySubmitPlan('${kpiId}','${activeMonth}')">ส่งข้อมูล (Submit)</button>
       </div>
       <div id="entryValidationBox_${kpiId}"></div>
     </div>
@@ -649,7 +704,7 @@ function entryAddEvidence(kpiId, monthKey) {
 }
 function entryRemoveEvidence(kpiId, monthKey, evId) { removeEvidenceLink(kpiId, monthKey, evId); renderEntry(); }
 function entrySubmitPlan(kpiId, monthKey) {
-  const r = submitPlanMonth(kpiId, monthKey);
+  const r = submitPlanMonth(kpiId, monthKey, entryState.selectedQuarter);
   const box = document.getElementById('entryValidationBox_' + kpiId);
   if (!r.ok) { if (box) box.innerHTML = `<div class="entry-validate-box bad">${r.issues.map(i => `⚠ ${entryEsc(i)}`).join('<br>')}</div>`; return; }
   entryToast('ส่งข้อมูลแล้ว — สถานะ "รอยืนยัน" (คะแนน Dashboard ยังไม่เปลี่ยนจนกว่าผู้ดูแลระบบจะยืนยัน)');
@@ -659,7 +714,22 @@ function entrySubmitPlan(kpiId, monthKey) {
 // ═══════════════════════════════════════════════════════════
 // CENTER + RIGHT dispatch
 // ═══════════════════════════════════════════════════════════
+// Section 4: Q1/Q2 don't need the full Entry form architecture — this app has never captured
+// per-month input for them (no such data exists to show), so they get a plain unavailable
+// notice rather than an empty numeric/investment/plan form. ห้ามสร้างข้อมูลเทียม Q1/Q2.
+function entryHistoricalQuarterHtml(q) {
+  const cfg = getQuarterConfig(q);
+  return `<div class="dtl-section-card entry-quarter-unavailable">
+    <div class="card-title">${cfg.label} — ข้อมูลย้อนหลัง</div>
+    <div class="entry-note-small" style="margin-top:6px;font-size:12.5px">${cfg.monthLabels.join(' · ')}</div>
+    <div class="entry-note-small" style="margin-top:10px">ไตรมาสนี้เป็นข้อมูลย้อนหลัง (Read-only) — หน้ากรอกข้อมูลนี้ไม่มีแบบฟอร์มรายเดือนสำหรับไตรมาสนี้ สามารถดูผลและคะแนนได้ที่หน้า "รายละเอียดตัวชี้วัด"</div>
+  </div>`;
+}
+// Section 15: Q4 reuses the SAME numeric/investment/plan/report components as Q3 (Section 5 —
+// no renderQ4Form()) — getQuarterMonths/getEntry already return Q4's own empty shape for them,
+// and isQuarterOpenForEntry('q4') is false so every control renders disabled either way.
 function entryCenterHtml() {
+  if (getQuarterStatus(entryState.selectedQuarter) === 'historical') return entryHistoricalQuarterHtml(entryState.selectedQuarter);
   if(ENTRY_KPI_TYPE[entryState.activeKpi]==='report') return reportFormHtml(reportActiveId());
   if (entryState.activeKpi === '1.1') return entryInvestmentFormHtml();
   if (entryState.activeKpi === '2.7') {
@@ -669,7 +739,19 @@ function entryCenterHtml() {
   return entryNumericFormHtml(entryState.activeKpi); // 2.4
 }
 
+// Section 9/16: the live compute preview below calls scoreLeafKPI/computeManagementStatus etc.
+// hardcoded to Q3 (the scoring engine — protected, unchanged). Rather than generalize the engine
+// to "compute a forecast for a quarter with no data", the preview panel is simply skipped for any
+// other selected quarter and replaced with a neutral notice — no new calculation is introduced.
 function entryPreviewHtml() {
+  const q = entryState.selectedQuarter;
+  if (q !== ENTRY_ACTIVE_QUARTER) {
+    const cfg = getQuarterConfig(q);
+    return `<div class="mini-card entry-quarter-unavailable">
+      <div class="mini-title">${cfg.label}</div>
+      <div class="entry-note-small" style="margin-top:6px">${entryEsc(quarterWriteBlockMessage(q))}</div>
+    </div>`;
+  }
   if(ENTRY_KPI_TYPE[entryState.activeKpi]==='report') return reportPreviewHtml(reportActiveId());
   if (entryState.activeKpi === '1.1') return entryInvestmentPreviewHtml();
   const kpiId = entryState.activeKpi === '2.7' ? (entryState.activeChild || '2.7.1') : '2.4';

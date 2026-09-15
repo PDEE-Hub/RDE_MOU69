@@ -258,6 +258,17 @@ main { max-width: 1720px; margin: 0 auto; padding: 24px 28px 56px; }
 .entry-role-toggle { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .entry-role-toggle button { border: none; background: #fff; padding: 7px 12px; font-size: 12px; cursor: pointer; font-family: inherit; color: var(--text2); }
 .entry-role-toggle button.active { background: var(--brand); color: #fff; font-weight: 700; }
+/* Step 5A — quarter switcher (Section 4): neutral/soft gray-blue by default, no red anywhere. */
+.entry-quarter-switcher { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.entry-qsw-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--border); background: #fff; border-radius: 10px; padding: 7px 16px; cursor: pointer; font-family: inherit; }
+.entry-qsw-btn .entry-qsw-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.entry-qsw-btn .entry-qsw-status { font-size: 10px; font-weight: 600; color: var(--nav-inactive-text); }
+.entry-qsw-btn.st-historical { background: var(--nav-inactive-bg); }
+.entry-qsw-btn.st-locked .entry-qsw-status { color: #1f7d51; }
+.entry-qsw-btn.st-locked { background: #eafaf1; border-color: #cdeadb; }
+.entry-qsw-btn.st-not_open { background: var(--nav-inactive-bg); }
+.entry-qsw-btn.active { border-color: var(--nav-active); box-shadow: 0 0 0 1px var(--nav-active) inset; }
+.entry-quarter-unavailable { color: var(--text2); }
 .entry-subnav { display: flex; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
 .entry-subnav button { border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 7px 14px; font-size: 12.5px; cursor: pointer; font-family: inherit; color: var(--text2); }
 .entry-subnav button.active { background: #fdecec; border-color: var(--brand); color: var(--brand); font-weight: 700; }

@@ -1,4 +1,6 @@
-// Shared Q3 reporting for the remaining KPI types. Historical seeds stay read-only.
+// Shared "report" KPI-type form, quarter-driven since Step 5A (entryState.selectedQuarter) —
+// Q3 is the only quarter with real data; other quarters render the same component empty/disabled.
+// Historical seeds stay read-only.
 const REPORT_FIELDS = {
   '1.2': {fields:[['amount','ค่าใช้จ่ายฝึกอบรมสะสมถึงสิ้น Q3 (ล้านบาท)'],['budget','กรอบค่าใช้จ่ายทั้งปี (ล้านบาท)']],defaults:{budget:26},method:'ค่าใช้จ่ายสะสม ÷ กรอบทั้งปี × 100', calc:v=>v.amount/v.budget*100},
   '1.3': {fields:[['factor','ค่า Factor ที่ดำเนินการได้','text']],human:true,method:'ผู้รับผิดชอบยืนยันคะแนนตามเกณฑ์ Eco-Efficiency และหลักฐาน'},
@@ -11,7 +13,7 @@ for(const id of ['2.1.1','2.1.2','2.1.3']) REPORT_FIELDS[id]={fields:[['revenue'
 for(const id of ['2.5.1','2.5.2']) REPORT_FIELDS[id]={fields:[['crane','Crane Productivity ตามรายงาน Q3'],['truck','ระยะเวลารับ–ส่งตู้สินค้า ตามรายงาน Q3'],['hinterland','ปริมาณตู้สินค้าหลังท่าสะสม Q3 (ที.อี.ยู.)']],human:true,method:'เก็บผลทั้ง 3 ด้าน และยืนยันคะแนนตามเกณฑ์; ไม่เฉลี่ยค่าประสิทธิภาพหรือให้คะแนนแทนผู้ประเมิน'};
 for(const id of ['2.8.1','2.8.2','2.8.3']) REPORT_FIELDS[id]={fields:[],human:true,method:'ยืนยันคะแนนตามขั้นตอนที่ดำเนินการได้ พร้อมข้อความและเอกสารประกอบ'};
 
-function reportDraft(id) { return Object.assign({values:{},summary_text:'',evidence:'',level:null},getEntry(id).draftReport || {}); }
+function reportDraft(id, quarter) { return Object.assign({values:{},summary_text:'',evidence:'',level:null},getEntry(id, quarter).draftReport || {}); }
 function reportDraftSet(id,key,value) {
   const d=reportDraft(id); if(key.startsWith('v:'))d.values=Object.assign({},d.values,{[key.slice(2)]:value});else d[key]=value;
   setEntry(id,{draftReport:d,status:'draft'}); entryRefreshPreview();
@@ -31,14 +33,15 @@ function reportCalculate(id) {
   const input=issues.length?null:config.human?Number(d.level):actual;
   return {ok:!issues.length,issues,actual:issues.length?null:actual,input,values:v,score:scoreLeafKPI(getEffectiveKpi(id),input,'q3')};
 }
-function reportConfirm(id) {
-  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
+function reportConfirm(id, quarter) {
+  quarter = quarter || ENTRY_ACTIVE_QUARTER;
+  if (!isQuarterOpenForEntry(quarter)) return { ok: false, code: quarterWriteBlockCode(quarter), issues: [quarterWriteBlockMessage(quarter)] };
   const result=reportCalculate(id); if(!result.ok)return result;
   const d=reportDraft(id),record={actual:result.actual,quarterlyResult:result.input,values:result.values,summary_text:d.summary_text,issue:Object.assign({},getIssue(id,'q3')),evidence:d.evidence.trim(),confirmedAt:new Date().toISOString()};
   if(id==='2.2')record.monthly=Object.assign({},result.values);
   setEntry(id,{status:'confirmed',confirmedAt:record.confirmedAt,publishedReport:record});ovrSet(id,'q3',result.input);return result;
 }
-function reportConfirmUi(id){const r=reportConfirm(id);if(!r.ok){document.getElementById('reportValidation').innerHTML=r.issues.map(entryEsc).join('<br>');return;}renderEntry();renderDetail();renderOverview();renderHome();entryToast('ยืนยันแล้ว — ผล คะแนน และข้อความเชื่อมทุกหน้า');}
+function reportConfirmUi(id){const r=reportConfirm(id, entryState.selectedQuarter);if(!r.ok){document.getElementById('reportValidation').innerHTML=r.issues.map(entryEsc).join('<br>');return;}renderEntry();renderDetail();renderOverview();renderHome();entryToast('ยืนยันแล้ว — ผล คะแนน และข้อความเชื่อมทุกหน้า');}
 function reportValidateUi(id){const r=reportCalculate(id);document.getElementById('reportValidation').innerHTML=r.ok?'ข้อมูลครบ พร้อมยืนยันบันทึก':r.issues.map(entryEsc).join('<br>');}
 function reportChildPicker(main) {
   const leaves=reportLeaves(main);if(leaves.length<=1)return '';
@@ -47,17 +50,21 @@ function reportChildPicker(main) {
 function reportLeaves(id){const k=MOU_DATA.kpis[id];return !k?[]:k.isLeaf?[k]:ovpChildren(id).flatMap(c=>reportLeaves(c.id));}
 function reportActiveId(){return entryState.activeChild||reportLeaves(entryState.activeKpi)[0]?.id||entryState.activeKpi;}
 function reportFormHtml(id){
-  const k=MOU_DATA.kpis[id],config=REPORT_FIELDS[id],d=reportDraft(id);
-  const ro=ENTRY_LOCKED?'disabled':'';
+  const q=entryState.selectedQuarter||ENTRY_ACTIVE_QUARTER;
+  const qLabel=getQuarterConfig(q)?.label||'Q3';
+  const k=MOU_DATA.kpis[id],config=REPORT_FIELDS[id],d=reportDraft(id,q);
+  const openForEntry=isQuarterOpenForEntry(q);
+  const ro=openForEntry?'':'disabled';
+  const tip=openForEntry?'':quarterWriteBlockMessage(q);
   return `${reportChildPicker(entryState.activeKpi)}<div class="dtl-section-card"><div class="card-title">${id} · ${entryEsc(k.label)}</div>
-  <div class="entry-meta-line">ผล Q3 · ${entryEsc(config.method)}</div>
+  <div class="entry-meta-line">ผล ${qLabel} · ${entryEsc(config.method)}</div>
   ${config.fields.map(([key,label,type])=>`<div class="entry-field-row col"><label>${label}</label><input class="entry-input" type="${type==='text'?'text':'number'}" ${type==='text'?'':'step="any" min="0"'} value="${entryEsc(String(d.values[key]??config.defaults?.[key]??''))}" ${ro} oninput="reportDraftSet('${id}','v:${key}',this.value)" placeholder="ยังไม่ได้กรอก"></div>`).join('')}
   <div class="entry-field-row col"><label>สรุปผลการดำเนินงาน / เหตุผลประกอบคะแนน</label><textarea class="entry-input" rows="4" ${ro} oninput="reportDraftSet('${id}','summary_text',this.value)">${entryEsc(d.summary_text)}</textarea></div>
-  ${entryIssueBlockHtml(id,'q3','report_'+id)}
+  ${entryIssueBlockHtml(id,q,'report_'+id)}
   <div class="entry-field-row col"><label>ลิงก์เอกสารประกอบ (ถ้ามี)</label><input class="entry-input" type="url" value="${entryEsc(d.evidence)}" ${ro} oninput="reportDraftSet('${id}','evidence',this.value)" placeholder="https://"></div>
   ${config.human?`<div class="entry-field-row col"><label>คะแนนที่ยืนยันตามเกณฑ์ (1–5; รองรับทศนิยม)</label><input class="entry-input" type="number" min="1" max="5" step="0.0001" value="${d.level??''}" ${ro} oninput="reportDraftSet('${id}','level',this.value)"></div>`:''}
   <div class="entry-note-small">ยืนยันบันทึกเพื่อส่งข้อมูลไปยังรายละเอียด ภาพรวม และ Home · ค่าร่างไม่แทนผลยืนยันเดิม</div>
-  <div class="entry-btn-row"><button class="entry-btn ghost" ${ro} onclick="entrySaveDraft()">บันทึกร่าง</button><button class="entry-btn secondary" ${ro} onclick="reportValidateUi('${id}')">ตรวจสอบข้อมูล</button><button class="entry-btn primary" ${ro} title="${ENTRY_LOCKED?ENTRY_LOCK_TOOLTIP:''}" onclick="reportConfirmUi('${id}')">ยืนยันบันทึก</button></div><div id="reportValidation" class="entry-validate-box"></div></div>`;
+  <div class="entry-btn-row"><button class="entry-btn ghost" ${ro} onclick="entrySaveDraft()">บันทึกร่าง</button><button class="entry-btn secondary" ${ro} onclick="reportValidateUi('${id}')">ตรวจสอบข้อมูล</button><button class="entry-btn primary" ${ro} title="${tip}" onclick="reportConfirmUi('${id}')">ยืนยันบันทึก</button></div><div id="reportValidation" class="entry-validate-box"></div></div>`;
 }
 function reportPreviewHtml(id){const r=reportCalculate(id),k=getEffectiveKpi(id);return `<div class="mini-card"><div class="mini-title">ผลจากข้อมูลที่กำลังกรอก</div><div class="entry-preview-row"><span>ผลการดำเนินงาน</span><b>${entryEsc(String(r.actual??'—'))}</b></div><div class="entry-preview-row"><span>คะแนน</span><b>${r.score.level===null?'—':r.score.level.toFixed(4)}</b></div><div class="entry-note-small">${r.ok?'พร้อมยืนยันบันทึก':r.issues.map(entryEsc).join('<br>')}</div></div><div class="mini-card">${reportCriteriaHtml(k)}</div>`;}
 function reportCriteriaHtml(k){if(k.thresholds.every(x=>x===null))return '<div class="dtl-source-note">ต้นทางไม่ได้ระบุเกณฑ์ตัวเลข 1–5; ใช้แผนงานและคะแนนที่ยืนยัน</div>';return `<div class="mini-title">เกณฑ์คะแนนตาม Excel</div><div class="report-criteria-list">${k.thresholds.map((t,i)=>`<div><span class="ovp-badge" style="background:${LV_COLORS[i+1]};color:#293750">${i+1}</span><span>${entryEsc(String(t??'ยังไม่ระบุ'))}${k.scoringMethod==='milestone_pct'?' ('+Number(t)*100+'%)':''}</span></div>`).join('')}</div>`;}
