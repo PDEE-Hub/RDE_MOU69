@@ -33,11 +33,29 @@ function getQuarterInput(kpiId, q) {
   return humanChosen ? seeded.score : seeded.actual;
 }
 
+// ── Public Viewer read path: remote -> frozen Q3 baseline -> null. Deliberately never consults
+//    getOverrides()/mou69_v1_overrides -- a stale override left in one browser's localStorage
+//    (e.g. from an earlier Entry/UAT session on that device) must never make the public
+//    dashboard show something different on that device than on a clean one. Entry/edit-state
+//    code keeps reading through getQuarterInput() above, unchanged. ──
+function getPublicQuarterInput(kpiId, q) {
+  if (typeof remotePilotGetInput === 'function') {
+    const remoteVal = remotePilotGetInput(kpiId, q);
+    if (remoteVal !== undefined) return remoteVal;
+  }
+  const seeded = MOU_DATA.quarterly[kpiId] && MOU_DATA.quarterly[kpiId][q];
+  if (!seeded) return null;
+  const kpi = MOU_DATA.kpis[kpiId];
+  const humanChosen = ['qualitative', 'evidence', 'milestone_manual'].includes(kpi.scoringMethod)
+    || (kpi.scoringMethod === 'annual_only' && q !== 'q4');
+  return humanChosen ? seeded.score : seeded.actual;
+}
+
 // ── Which quarter is "latest with data" per KPI (drives Home's active period) ──
 function latestQuarterWithData(kpiId) {
   let latest = null;
   for (const q of QUARTERS) {
-    if (getQuarterInput(kpiId, q) !== null) latest = q;
+    if (getPublicQuarterInput(kpiId, q) !== null) latest = q;
   }
   return latest;
 }
@@ -46,8 +64,8 @@ function latestQuarterWithData(kpiId) {
 function systemActiveQuarter() {
   const overrides = getOverrides();
   const allLeaf = Object.values(MOU_DATA.kpis).filter(k => k.isLeaf);
-  const anyQ3 = allLeaf.some(k => getQuarterInput(k.id, 'q3') !== null);
-  const anyQ4 = allLeaf.some(k => getQuarterInput(k.id, 'q4') !== null);
+  const anyQ3 = allLeaf.some(k => getPublicQuarterInput(k.id, 'q3') !== null);
+  const anyQ4 = allLeaf.some(k => getPublicQuarterInput(k.id, 'q4') !== null);
   if (anyQ4) return 'q4';
   if (anyQ3) return 'q3';
   return 'q2';
@@ -64,7 +82,7 @@ function kpiForScoring(kpiId) {
 // ── Score a single leaf KPI at quarter q ──
 function scoreAt(kpiId, q) {
   const kpi = kpiForScoring(kpiId);
-  const input = getQuarterInput(kpiId, q);
+  const input = getPublicQuarterInput(kpiId, q);
   const result=scoreLeafKPI(kpi,input,q);
   if(typeof reportValue==='function') result.rawValue=reportValue(kpiId,q);
   return result;
@@ -724,7 +742,7 @@ function dtlPlaceholderMain(id) {
 }
 
 // All views consume the same confirmed input. Q3/Q4 have no Excel fallback.
-function dtl24Input(q) { return getQuarterInput('2.4', q); }
+function dtl24Input(q) { return getPublicQuarterInput('2.4', q); }
 function dtl24Score(q) { return scoreAt('2.4', q); }
 function publishedQuarterReport(kpiId, q) {
   // Remote Read: MOU69_DB wins for any KPI it genuinely has a report for, while remote is live
@@ -733,14 +751,14 @@ function publishedQuarterReport(kpiId, q) {
     const remoteReport = remotePilotGetReport(kpiId, q);
     if (remoteReport) return remoteReport;
   }
-  if(q==='q3' && kpiId.startsWith('1.1') && getQuarterInput('1.1.1',q)!==null) {
+  if(q==='q3' && kpiId.startsWith('1.1') && getPublicQuarterInput('1.1.1',q)!==null) {
     // '1.1' itself can also have a remote record (the shared narrative, same as local) -- keep
     // the same remote > local-entry > baseline order as the generic check above.
     const remoteShared = typeof remotePilotGetReport === 'function' ? remotePilotGetReport('1.1', q) : null;
     return remoteShared || getEntry('1.1').publishedReport || (MOU_DATA.quarterlyReports && MOU_DATA.quarterlyReports['1.1']) || null;
   }
   if(q==='q3' && !MOU_DATA.kpis[kpiId]?.isLeaf) { const records=ovpChildren(kpiId).map(k=>[k,publishedQuarterReport(k.id,q)]).filter(x=>x[1]); return records.length?{summary_text:records.map(([k,r])=>k.id+' '+k.label+' · '+(r.summary_text||'')).join('\n'),issue:{obstacle_text:records.map(([k,r])=>r.issue?.obstacle_text?k.id+' '+r.issue.obstacle_text:'').filter(Boolean).join('\n'),solution_text:records.map(([k,r])=>r.issue?.solution_text?k.id+' '+r.issue.solution_text:'').filter(Boolean).join('\n')}}:null; }
-  if (q !== 'q3' || typeof getEntry !== 'function' || getQuarterInput(kpiId,q) === null) return null;
+  if (q !== 'q3' || typeof getEntry !== 'function' || getPublicQuarterInput(kpiId,q) === null) return null;
   const entry = getEntry(kpiId);
   if (entry.publishedReport) return entry.publishedReport;
   // Existing confirmed sessions keep their values; no draft is promoted.
@@ -762,7 +780,7 @@ function reportSummaryHtml(kpiId,q) {
 }
 function quarterCoverageText(q) {
   const leaves = Object.values(MOU_DATA.kpis).filter(k=>k.isLeaf);
-  const n = leaves.filter(k=>getQuarterInput(k.id,q)!==null).length;
+  const n = leaves.filter(k=>getPublicQuarterInput(k.id,q)!==null).length;
   return `มีผล ${n}/${leaves.length} ตัวชี้วัดย่อย` + (n<leaves.length ? ' · คะแนนสะสมจากข้อมูลที่มี ยังไม่ครบไตรมาส' : '');
 }
 function openDetailAt(kpiId,q) {

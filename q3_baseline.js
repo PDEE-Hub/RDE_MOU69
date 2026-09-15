@@ -4,11 +4,29 @@
 // the confirmed UAT export -- same source MOU69_DB's KPI_RESULT/KPI_VALUES/KPI_ISSUES rows
 // were migrated from, see apps_script/Code.gs "source":"UAT_JSON_MIGRATION"). Q1/Q2 are Excel
 // seeds; Q3 here is the last locally-confirmed UAT snapshot, added in the SAME {actual,score,
-// note} shape getQuarterInput() already reads for Q1/Q2 -- no code path changes for scoring.
-// quarterlyReports carries the matching narrative (summary/obstacle/solution) as a fallback
-// publishedQuarterReport() reads only when a browser has no local UAT/entry data of its own,
-// so it never overrides a genuinely different local confirmation. KPI 2.1.1 is exempted at
-// read time by remote_data_adapter.js's own precedence -- unaffected here.
+// note} shape getQuarterInput()/getPublicQuarterInput() already read for Q1/Q2 -- no code path
+// changes for scoring. quarterlyReports carries the matching narrative (summary/obstacle/
+// solution) as a fallback publishedQuarterReport() reads only when a browser has no local
+// UAT/entry data of its own, so it never overrides a genuinely different local confirmation.
+// KPI 2.1.1 is exempted at read time by remote_data_adapter.js's own precedence -- unaffected
+// here.
+//
+// KPI 2.7 group (2026-09-15 addition): absent from the original 2026-09-12 freeze above because
+// KPI 2.7 was not yet confirmed in the UAT export at that time -- this is the cross-device Q3
+// parity fix's root cause (Public Viewer had no baseline to fall back to for these 5 leaves).
+// Values below are MOU69_DB's own current KPI_RESULT figures for 2.7's five leaves, confirmed
+// directly against the central sheet on 2026-09-15 -- not re-derived, not estimated. For the
+// three milestone_pct leaves (2.7.1/2.7.2/2.7.4) only .actual is ever read (getPublicQuarterInput
+// / engine.js interpolate it); their .score is stored as null because MOU69_DB's own score_final
+// cell is blank for them -- never invented here. For the two milestone_manual leaves
+// (2.7.3.1/2.7.3.2) .score is the confirmed human-assigned Level (engine.js takes it as-is,
+// no interpolation) and .actual is kept only as the informational milestone %, same convention
+// as every other KPI's {actual,score,note} entry above.
+MOU_DATA.quarterly["2.7.1"].q3 = {"actual":0.7246,"score":null,"note":null};
+MOU_DATA.quarterly["2.7.2"].q3 = {"actual":0.4250,"score":null,"note":null};
+MOU_DATA.quarterly["2.7.3.1"].q3 = {"actual":0.6000,"score":3,"note":null};
+MOU_DATA.quarterly["2.7.3.2"].q3 = {"actual":0.5000,"score":2,"note":null};
+MOU_DATA.quarterly["2.7.4"].q3 = {"actual":0.8000,"score":null,"note":null};
 MOU_DATA.quarterly["1.1.1"].q3 = {"actual":54.50394034248922,"score":1,"note":null};
 MOU_DATA.quarterly["1.1.2"].q3 = {"actual":74.89697445694392,"score":1,"note":null};
 MOU_DATA.quarterly["1.2"].q3 = {"actual":56.05769230769231,"score":1,"note":null};

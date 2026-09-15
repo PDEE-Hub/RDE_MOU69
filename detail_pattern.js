@@ -4,7 +4,7 @@ function unifiedDetailHtml(id) {
  const score=qq=>leaf?scoreAt(id,qq):scoreParentAt(id,qq);
  const s=score(q),fc=forecastHomeScore(id),forecast=MOU_DATA.forecast[id];
  const report=publishedQuarterReport(id,q),children=ovpChildren(id),leaves=reportLeaves(id);
- const filled=leaves.filter(c=>getQuarterInput(c.id,q)!==null).length;
+ const filled=leaves.filter(c=>getPublicQuarterInput(c.id,q)!==null).length;
  const esc=v=>entryEsc(v===null||v===undefined||v===''?'-':String(v));
  const num=v=>v===null||v===undefined?'-':typeof v==='number'?ovpFmt(v):esc(v);
  const level=v=>v===null||v===undefined?'-':Number(v).toFixed(4);
