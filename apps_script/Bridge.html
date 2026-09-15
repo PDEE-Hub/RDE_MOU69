@@ -1,18 +1,36 @@
 <!--
-  Bridge.html — Step 5B.1 CORS-safe write transport.
+  Bridge.html — Step 5B.2 CORS-safe write transport (MessageChannel handshake).
 
   Served by Code.gs's doGet at ?view=write_bridge (HtmlService, XFrameOptionsMode.ALLOWALL so
-  GitHub Pages can embed it in a hidden iframe). This page has NO UI for a human — its only job
-  is to sit in that iframe and relay two things between the GitHub Pages parent and the
-  google.script.run RPC surface (bridgeWrite/bridgeHealth in Code.gs):
+  GitHub Pages can embed it in an iframe). This page has NO UI for a human — its only job is to
+  relay two things between the GitHub Pages TOP window and the google.script.run RPC surface
+  (bridgeWrite/bridgeHealth in Code.gs).
 
-    parent --postMessage(BRIDGE_WRITE/BRIDGE_HEALTH)--> this page
+  Why MessageChannel instead of plain window.postMessage for everything: Apps Script's
+  HtmlService actually nests this page inside a script.google.com wrapper iframe, which itself
+  contains the *.googleusercontent.com sandbox iframe this script really executes in. The parent
+  page's own iframe.contentWindow is therefore NOT the window this script runs in, so a naive
+  `event.source === iframe.contentWindow` check on the parent side rejects every legitimate
+  message from here. A MessagePort sidesteps that entirely: this page creates the channel itself
+  and hands the parent one port (transferred inside the very first, and ONLY ever window-level,
+  message — window.top.postMessage, not window.parent, since window.top is the actual GitHub
+  page when this is embedded there through however many Google wrapper frames sit in between).
+  Every request/response after that travels over that dedicated port — no more window-level
+  postMessage, so which nested frame this script executes in stops mattering.
+
+    this page --window.top.postMessage(BRIDGE_READY, GitHub origin, [port2])--> GitHub parent
+    GitHub parent --port.postMessage(BRIDGE_WRITE/BRIDGE_HEALTH)--> this page (via port1)
     this page --google.script.run--> Apps Script server (processWriteRequest_)
     this page <--result/error-- Apps Script server
-    this page --postMessage(BRIDGE_RESPONSE)--> parent
+    this page --port1.postMessage(BRIDGE_RESPONSE)--> GitHub parent
+
+  bridgeSession below is a handshake nonce the server injected (see Code.gs's renderWriteBridge_)
+  from the query string the parent generated — it is NOT the write auth token. If the server
+  refused to hand this page a valid nonce (missing/malformed), this script does nothing at all:
+  no channel, no READY, so the parent simply times out rather than trusting an unverified session.
 
   No third-party library. No UI. Never logs the request body (it may contain authToken) or any
-  token value — only action/id/ok get referenced in code, nothing is printed.
+  token/nonce value — only channel/type/messageId/ok get referenced in code, nothing is printed.
 -->
 <!DOCTYPE html>
 <html>
@@ -22,33 +40,32 @@
 (function () {
   'use strict';
   var CHANNEL = 'MOU69_WRITE_BRIDGE';
-  // The only parent this bridge ever expects or replies to. Messages from any other origin are
-  // ignored outright (§B) — this is a static, known value (the dashboard's own GitHub Pages
-  // origin), not a guess, and it is also the only origin every outgoing postMessage ever targets
-  // (never '*'), so a reply can never be delivered to the wrong page even if this iframe were
-  // somehow navigated elsewhere first.
+  // The only parent this bridge ever targets. Static, known value (the dashboard's own GitHub
+  // Pages origin) — never '*' — so the READY handshake (and, if it somehow mattered, anything
+  // else) can only ever be delivered to the genuine top page.
   var PARENT_ORIGIN = 'https://pdee-hub.github.io';
+  var BRIDGE_SESSION = <?!= JSON.stringify(bridgeSession) ?>;
 
-  function post(data) {
-    if (window.parent) window.parent.postMessage(data, PARENT_ORIGIN);
-  }
+  if (!BRIDGE_SESSION) return; // server did not hand us a valid session nonce — stay silent
 
-  function respond(id, ok, result, errorCode, errorMessage) {
-    var msg = { channel: CHANNEL, type: 'BRIDGE_RESPONSE', id: id, ok: ok };
+  var channel = new MessageChannel();
+  var port1 = channel.port1;
+
+  function respond(messageId, ok, result, errorCode, errorMessage) {
+    var msg = { channel: CHANNEL, type: 'BRIDGE_RESPONSE', bridgeSession: BRIDGE_SESSION, messageId: messageId, ok: ok };
     if (ok) msg.result = result;
     else msg.error = { code: errorCode || 'BRIDGE_ERROR', message: errorMessage || 'Bridge request failed.' };
-    post(msg);
+    port1.postMessage(msg);
   }
 
-  window.addEventListener('message', function (event) {
-    if (event.origin !== PARENT_ORIGIN) return; // (B) ignore anything not from the expected parent
+  port1.onmessage = function (event) {
     var data = event.data;
-    if (!data || data.channel !== CHANNEL) return; // (C) wrong/no channel — not for us
+    if (!data || data.channel !== CHANNEL || data.bridgeSession !== BRIDGE_SESSION) return;
 
     if (data.type === 'BRIDGE_HEALTH') {
       google.script.run
-        .withSuccessHandler(function (res) { respond(data.id, true, res); })
-        .withFailureHandler(function () { respond(data.id, false, null, 'BRIDGE_ERROR', 'bridgeHealth call failed.'); })
+        .withSuccessHandler(function (res) { respond(data.messageId, true, res); })
+        .withFailureHandler(function () { respond(data.messageId, false, null, 'BRIDGE_ERROR', 'bridgeHealth call failed.'); })
         .bridgeHealth();
       return;
     }
@@ -57,15 +74,20 @@
       // data.body may contain authToken — never logged, never echoed anywhere except forwarded
       // as-is to the server over google.script.run (which Google, not this page, transports).
       google.script.run
-        .withSuccessHandler(function (res) { respond(data.id, true, res); })
-        .withFailureHandler(function () { respond(data.id, false, null, 'BRIDGE_ERROR', 'bridgeWrite call failed.'); })
+        .withSuccessHandler(function (res) { respond(data.messageId, true, res); })
+        .withFailureHandler(function () { respond(data.messageId, false, null, 'BRIDGE_ERROR', 'bridgeWrite call failed.'); })
         .bridgeWrite(data.body);
       return;
     }
-  }, false);
+  };
 
-  // (A) Tell the parent this iframe can now receive requests.
-  post({ channel: CHANNEL, type: 'BRIDGE_READY' });
+  // The one and only window-level message this page ever sends: hand port2 to the real top
+  // window, carrying the same session nonce the parent will check against what it generated.
+  window.top.postMessage(
+    { channel: CHANNEL, type: 'BRIDGE_READY', bridgeSession: BRIDGE_SESSION },
+    PARENT_ORIGIN,
+    [channel.port2]
+  );
 })();
 </script>
 </body>

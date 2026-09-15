@@ -31,10 +31,10 @@ function doGet(e) {
   const action = (e && e.parameter && e.parameter.action) || '';
   const view = (e && e.parameter && e.parameter.view) || '';
   try {
-    // Step 5B.1: the only new route. Existing action=health/action=bootstrap behavior below is
-    // completely untouched — this is checked first only because `view` and `action` are
+    // Step 5B.1/5B.2: the only new route. Existing action=health/action=bootstrap behavior below
+    // is completely untouched — this is checked first only because `view` and `action` are
     // different query params entirely, never a behavior change to the JSON GET API.
-    if (view === 'write_bridge') return renderWriteBridge_();
+    if (view === 'write_bridge') return renderWriteBridge_(e);
     if (action === 'health') return jsonOut(handleHealth());
     if (action === 'bootstrap') return jsonOut(handleBootstrap(e.parameter.fiscal_year));
     return jsonOut({ ok: false, error: 'unknown_action', action: action });
@@ -43,14 +43,27 @@ function doGet(e) {
   }
 }
 
-// Serves apps_script/Bridge.html — a tiny, UI-less page whose only job is to receive a
-// postMessage from the GitHub Pages parent, forward it to bridgeWrite/bridgeHealth via
-// google.script.run, and postMessage the result back. ALLOWALL is required for Google to let
-// this specific page be embedded in an iframe on another origin; it does NOT affect the JSON
-// GET API's CORS behavior in any way (that's a separate, unrelated response path).
-function renderWriteBridge_() {
-  return HtmlService.createTemplateFromFile('Bridge')
-    .evaluate()
+// Handshake nonce format the client generates (§5B.2 §1) — 16-128 lowercase/uppercase hex chars.
+// This is NOT an auth secret; it only proves a READY answers the specific iframe that requested
+// it. Required, format-limited, length-limited per the brief — anything else is treated as absent.
+const BRIDGE_SESSION_FORMAT = /^[0-9a-f]{16,128}$/i;
+
+// Serves apps_script/Bridge.html — a tiny, UI-less page whose only job is to open a dedicated
+// MessageChannel to the GitHub Pages parent (window.top) and relay BRIDGE_HEALTH/BRIDGE_WRITE to
+// bridgeWrite/bridgeHealth via google.script.run over that channel. ALLOWALL is required for
+// Google to let this specific page be embedded in an iframe on another origin; it does NOT affect
+// the JSON GET API's CORS behavior in any way (that's a separate, unrelated response path).
+//
+// §5B.2 §2: reads and validates the client's handshake nonce, then injects it into the template
+// via contextual (JS-string) escaping — Bridge.html must have this exact value to include in its
+// BRIDGE_READY message, or the parent will refuse the handshake. Never injects MOU69_WRITE_TOKEN
+// or any other secret into this template.
+function renderWriteBridge_(e) {
+  const raw = (e && e.parameter && e.parameter.bridgeSession) || '';
+  const bridgeSession = BRIDGE_SESSION_FORMAT.test(raw) ? raw : '';
+  const template = HtmlService.createTemplateFromFile('Bridge');
+  template.bridgeSession = bridgeSession; // '' when missing/invalid — Bridge.html then refuses to send READY at all, so the parent simply times out rather than trusting an unverified session
+  return template.evaluate()
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
