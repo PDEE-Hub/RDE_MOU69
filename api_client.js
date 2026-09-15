@@ -127,195 +127,93 @@ function apiRequestId() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// STEP 5B.1/5B.2/5B.3 — CORS-safe write transport: hidden iframe -> google.script.run, replacing
-// the direct fetch() POST used through commit ab14576 (Apps Script Web Apps don't send
-// Access-Control-Allow-Origin on a POST response by default, so a cors-mode fetch() throws
-// "Failed to fetch" even on a successful write — google.script.run isn't subject to CORS at all).
+// STEP 5B.4 — Hidden form POST + GET status polling, replacing the postMessage/MessageChannel
+// bridge (5B.1-5B.3) entirely. Production kept failing that transport ("dropping postMessage..
+// was from unexpected window", then BRIDGE_ERROR timeouts even after 5B.3's parent-initiated
+// handshake) — Apps Script's internal nested-frame structure just isn't stable enough to rely on
+// for direct frame discovery. apps_script/Bridge.html is no longer required for write transport
+// (left in the repo unused rather than deleted — see that file's own header).
 //
-// 5B.2 tried: Bridge.html creates a MessageChannel itself and sends READY (with the transferred
-// port) via window.top.postMessage. That FAILED in production: Apps Script's HtmlService nests
-// the served page inside a script.google.com wrapper iframe, which itself contains the
-// *.googleusercontent.com sandbox iframe Bridge.html really executes in — and that sandbox's OWN
-// window.top is itself (or the googleusercontent wrapper), never the GitHub page, so
-// `window.top.postMessage(..., 'https://pdee-hub.github.io', ...)` threw a target-origin mismatch
-// at the browser level before the message could even be sent.
-//
-// 5B.3 fix: flip who initiates. This page (the parent) reads the inner sandbox WindowProxy via
-// `bridgeIframe.contentWindow.frames[0]` (only `.frames`/`.length`/`.postMessage` are ever
-// touched on that cross-origin object — never `.document`), creates the MessageChannel itself,
-// and sends BRIDGE_INIT with the transferred port DIRECTLY to that WindowProxy with
-// targetOrigin '*'. '*' is acceptable here ONLY because this one bootstrap message carries
-// nothing but a random per-session nonce and a MessagePort — no authToken, no KPI payload — and
-// is addressed to a WindowProxy this page itself just selected (never attacker-influenced).
-// Bridge.html then validates that INIT (exact GitHub origin + channel/type + matching nonce +
-// exactly one port) before trusting it, and replies READY over the now-established port. Every
-// message after that — including every later HEALTH/WRITE call carrying authToken — travels only
-// over that dedicated MessagePort; there is no window-level postMessage anywhere in the RPC path,
-// and Bridge.html's one remaining window-message listener only ever accepts BRIDGE_INIT.
-//
-// A single hidden iframe (id="mou69-write-bridge") is created once and reused for the whole page
-// session — never recreated per write; only the INIT handshake step is retried (new
-// MessageChannel each attempt) until the inner frame exists and answers, or BRIDGE_READY_TIMEOUT_MS.
+// This transport instead uses the oldest, most standard mechanism for a cross-origin write: a
+// real HTML <form method="POST"> submitted into a hidden target iframe — an ordinary browser
+// navigation, not a fetch(), so there is no CORS response-reading step to fail. The response is
+// deliberately never read (the target iframe navigates to Apps Script's own error/redirect page,
+// which this code never looks at). Instead, the server (doPost, see apps_script/Code.gs) caches a
+// sanitized result keyed by requestId, and this page retrieves it via the SAME GET mechanism
+// health/bootstrap have used reliably throughout this whole project (action=writeStatus).
 // ═══════════════════════════════════════════════════════════
-const BRIDGE_CHANNEL = 'MOU69_WRITE_BRIDGE';
-const BRIDGE_READY_TIMEOUT_MS = 10000;
-const BRIDGE_RPC_TIMEOUT_MS = 18000;
-const BRIDGE_INIT_RETRY_MS = 150;
+const WRITE_POLL_INITIAL_DELAY_MS = 300;
+const WRITE_POLL_INTERVAL_MS = 500;
+const WRITE_POLL_TIMEOUT_MS = 15000;
 
-// Handshake nonce only — proves "this INIT/READY answers the iframe THIS page just created,"
-// nothing more. NEVER the write auth token (that's MOU69_WRITE_TOKEN, checked server-side in
-// checkAuth_ — completely separate). 128 bits, regenerated fresh per bridge session.
-function generateBridgeSessionId_() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+let _writeTargetIframe = null; // created once, reused as every write form's target= for the session
+
+function ensureWriteTargetIframe_() {
+  if (_writeTargetIframe) return _writeTargetIframe;
+  const iframe = document.createElement('iframe');
+  iframe.name = 'mou69-write-target';
+  iframe.id = 'mou69-write-target';
+  iframe.style.display = 'none';
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
+  _writeTargetIframe = iframe;
+  return iframe;
 }
 
-let _bridgeIframe = null;
-let _bridgeSessionId = null; // this page's own random nonce for the current handshake
-let _bridgePort = null;      // the MessagePort this page keeps once Bridge.html answers READY on it
-let _bridgeReadyPromise = null;
-let _bridgePollHandle = null;
-let _bridgeTimeoutHandle = null;
-const _bridgePending = {}; // messageId -> { resolve, timeoutHandle }
-
-// Steady-state RPC handler — everything AFTER the handshake, over the dedicated port only. No
-// window-level postMessage, no dependency on which nested frame Bridge.html happens to run in.
-function _bridgePortMessageHandler(event) {
-  const data = event.data;
-  if (!data || data.channel !== BRIDGE_CHANNEL || data.bridgeSession !== _bridgeSessionId || data.type !== 'BRIDGE_RESPONSE') return;
-  const pending = _bridgePending[data.messageId];
-  if (!pending) return; // no longer waiting (already timed out, or unknown id) — drop it
-  clearTimeout(pending.timeoutHandle);
-  delete _bridgePending[data.messageId];
-  if (data.ok) { pending.resolve(data.result); return; }
-  const err = data.error || {};
-  pending.resolve({ ok: false, code: err.code || 'BRIDGE_ERROR', message: err.message || 'Bridge request failed.' });
+// `body` (which contains authToken) travels ONLY inside this form's POST body — never a query
+// string, never a URL, never a custom header. The form element itself is removed from the DOM
+// immediately after submit(); its response is never read (that's what the write-result cache +
+// writeStatus polling below are for).
+function submitWriteForm_(body) {
+  ensureWriteTargetIframe_();
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = API_BASE_URL;
+  form.target = 'mou69-write-target';
+  form.style.display = 'none';
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = 'payload';
+  input.value = JSON.stringify(body);
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+  form.parentNode.removeChild(form);
 }
 
-// Creates the iframe on first use only; every later call reuses the same iframe/promise/port.
-function ensureBridgeReady() {
-  if (_bridgeReadyPromise) return _bridgeReadyPromise;
-  _bridgeReadyPromise = new Promise(function (resolve, reject) {
-    if (!API_BASE_URL) { reject(new Error('API_BASE_URL not configured')); return; }
-    _bridgeSessionId = generateBridgeSessionId_();
+function sleep_(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
-    const iframe = document.createElement('iframe');
-    iframe.id = 'mou69-write-bridge';
-    iframe.style.display = 'none';
-    iframe.setAttribute('aria-hidden', 'true');
-    // bridgeSession is a handshake nonce ONLY — never the write token, never anything sensitive —
-    // so putting it in the iframe URL is fine (it protects nothing on its own; see the header note).
-    iframe.src = API_BASE_URL + '?view=write_bridge&bridgeSession=' + encodeURIComponent(_bridgeSessionId);
-    document.body.appendChild(iframe);
-    _bridgeIframe = iframe;
-
-    let settled = false;
-
-    // §1/§7: the inner Apps Script sandbox frame (where Bridge.html actually runs) may not exist
-    // in the DOM the instant the outer iframe's src is set, and even once it does, Bridge.html's
-    // own script may not have attached its listener yet — so this retries the WHOLE
-    // discover+send step (a fresh MessageChannel each time) until a READY comes back. Only
-    // .frames/.length/.postMessage are ever touched on the cross-origin WindowProxy — never
-    // .document — per the browser's own safe cross-origin Window allowlist.
-    function trySendInit() {
-      if (settled) return;
-      let innerWindow = null;
-      try {
-        const cw = iframe.contentWindow;
-        if (cw && cw.frames && cw.frames.length > 0) innerWindow = cw.frames[0];
-      } catch (e) { innerWindow = null; }
-      if (!innerWindow) return;
-
-      const channel = new MessageChannel();
-      const port1 = channel.port1;
-      port1.onmessage = function (event) {
-        if (settled) return;
-        const data = event.data;
-        if (!data || data.channel !== BRIDGE_CHANNEL || data.type !== 'BRIDGE_READY' || data.bridgeSession !== _bridgeSessionId) return;
-        settled = true;
-        if (_bridgePollHandle) { clearInterval(_bridgePollHandle); _bridgePollHandle = null; }
-        if (_bridgeTimeoutHandle) { clearTimeout(_bridgeTimeoutHandle); _bridgeTimeoutHandle = null; }
-        port1.onmessage = _bridgePortMessageHandler; // switch to steady-state RPC handling
-        _bridgePort = port1;
-        resolve();
-      };
-      port1.start();
-      // §3: targetOrigin '*' — ONLY for this one bootstrap message, which carries nothing but a
-      // random nonce and a MessagePort, sent to a WindowProxy THIS page itself just selected.
-      // Never used again after this; no authToken/KPI payload ever travels this way.
-      innerWindow.postMessage({ channel: BRIDGE_CHANNEL, type: 'BRIDGE_INIT', bridgeSession: _bridgeSessionId }, '*', [channel.port2]);
-    }
-
-    _bridgeTimeoutHandle = setTimeout(function () {
-      if (settled) return;
-      settled = true;
-      if (_bridgePollHandle) { clearInterval(_bridgePollHandle); _bridgePollHandle = null; }
-      reject(new Error('Write bridge did not become ready in time.'));
-    }, BRIDGE_READY_TIMEOUT_MS);
-
-    _bridgePollHandle = setInterval(trySendInit, BRIDGE_INIT_RETRY_MS);
-    trySendInit(); // also try immediately, don't wait a full poll interval
-  });
-  return _bridgeReadyPromise;
+// Polls action=writeStatus until the server's cached result is no longer `pending`, or
+// WRITE_POLL_TIMEOUT_MS elapses. Never resubmits the write on timeout (§6) — a caller may query
+// the same requestId again later if they want to keep waiting.
+async function pollWriteStatus_(requestId) {
+  const deadline = Date.now() + WRITE_POLL_TIMEOUT_MS;
+  await sleep_(WRITE_POLL_INITIAL_DELAY_MS);
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${API_BASE_URL}?action=writeStatus&requestId=${encodeURIComponent(requestId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && !data.pending) return data;
+      }
+    } catch (e) { /* transient network hiccup — keep polling until the overall timeout */ }
+    await sleep_(WRITE_POLL_INTERVAL_MS);
+  }
+  return { ok: false, code: 'WRITE_STATUS_TIMEOUT', message: 'Write request was submitted but final status was not confirmed in time.' };
 }
 
-// Full reset (§9): closes the port, drops the iframe, fails every still-pending call, clears any
-// in-flight handshake timers, and resets all state so the next ensureBridgeReady() performs a
-// completely fresh handshake with a new session nonce and a new (single) iframe. Not called
-// automatically anywhere in this phase — kept for future use.
-function resetBridge() {
-  if (_bridgePollHandle) { clearInterval(_bridgePollHandle); _bridgePollHandle = null; }
-  if (_bridgeTimeoutHandle) { clearTimeout(_bridgeTimeoutHandle); _bridgeTimeoutHandle = null; }
-  if (_bridgePort) { try { _bridgePort.close(); } catch (e) {} }
-  if (_bridgeIframe && _bridgeIframe.parentNode) _bridgeIframe.parentNode.removeChild(_bridgeIframe);
-  Object.keys(_bridgePending).forEach(function (id) {
-    clearTimeout(_bridgePending[id].timeoutHandle);
-    _bridgePending[id].resolve({ ok: false, code: 'BRIDGE_ERROR', message: 'Bridge was reset.' });
-    delete _bridgePending[id];
-  });
-  _bridgeIframe = null;
-  _bridgePort = null;
-  _bridgeSessionId = null;
-  _bridgeReadyPromise = null;
-}
-
-function bridgeCall_(type, body, messageId) {
-  return ensureBridgeReady().then(function () {
-    return new Promise(function (resolve) {
-      const timeoutHandle = setTimeout(function () {
-        delete _bridgePending[messageId];
-        resolve({ ok: false, code: 'BRIDGE_TIMEOUT', message: 'No response from write bridge.' });
-      }, BRIDGE_RPC_TIMEOUT_MS);
-      _bridgePending[messageId] = { resolve: resolve, timeoutHandle: timeoutHandle };
-      // Dedicated MessagePort, not window.postMessage — no targetOrigin to get wrong, and no
-      // nested-frame addressing problem, for this or any future call on this same port.
-      _bridgePort.postMessage({ channel: BRIDGE_CHANNEL, type: type, bridgeSession: _bridgeSessionId, messageId: messageId, body: body });
-    });
-  }).catch(function (e) {
-    return { ok: false, code: 'BRIDGE_ERROR', message: e.message || 'Bridge initialization failed.' };
-  });
-}
-
-// Proves iframe -> google.script.run -> Apps Script -> iframe works, before a caller ever
-// attempts a real write. Travels entirely over the MessagePort — no auth token involved.
-async function apiBridgeHealth() {
-  if (!API_BASE_URL) return { ok: false, code: 'NOT_CONFIGURED' };
-  return bridgeCall_('BRIDGE_HEALTH', {}, apiRequestId());
-}
-
-// `action` must be one of the server's own allowlisted actions — this function is not a generic
-// write API, it just forwards to one, over the MessagePort bridge. External contract is unchanged
-// from Step 5B (still an async function resolving to {ok,...}) so Step 5C can call it without any
-// rewrite. authToken travels inside `body` over the established MessagePort only — never the URL,
-// never a window-level postMessage.
+// `action` must be one of the server's own allowlisted actions (checked server-side in
+// processWriteRequest_) — this function is not a generic write API, it just forwards to one.
+// External contract is unchanged from Step 5B (still an async function resolving to {ok,...}) so
+// Step 5C can call it without any rewrite.
 async function apiWrite(action, fields) {
   if (!API_BASE_URL) return { ok: false, code: 'NOT_CONFIGURED' };
   const token = apiGetWriteToken();
   if (!token) return { ok: false, code: 'UNAUTHORIZED', message: 'No write token set for this session — call apiSetWriteToken(token) first.' };
   const requestId = apiRequestId();
   const body = Object.assign({ action: action, authToken: token, requestId: requestId }, fields);
-  return bridgeCall_('BRIDGE_WRITE', body, requestId);
+  submitWriteForm_(body);
+  return pollWriteStatus_(requestId);
 }
 
 // Writes only AUDIT_LOG (never KPI_RESULT/etc.) — the one action that doesn't depend on any

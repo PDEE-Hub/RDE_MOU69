@@ -1,6 +1,17 @@
 <!--
   Bridge.html — Step 5B.3 CORS-safe write transport (parent-initiated MessageChannel handshake).
 
+  *** STEP 5B.4 UPDATE: NO LONGER USED BY THE FRONTEND. ***
+  Production kept failing this transport even after 5B.3's fix ("dropping postMessage.. was from
+  unexpected window", then BRIDGE_ERROR timeouts) — Apps Script's internal nested-frame structure
+  isn't stable enough to rely on for direct frame discovery from a hidden iframe. api_client.js
+  now uses a hidden HTML form POST + GET status polling instead (see its own STEP 5B.4 header
+  comment, and apps_script/Code.gs's doPost/handleWriteStatus_). This file, and the
+  bridgeWrite/bridgeHealth functions and ?view=write_bridge route in Code.gs it depends on, are
+  left in place rather than deleted (avoids a destructive diff and preserves the history of what
+  was tried) but are now dead code — nothing in the deployed dashboard calls any of it anymore.
+  The rest of this comment block is kept as-is, describing the 5B.3 design that is no longer used.
+
   Served by Code.gs's doGet at ?view=write_bridge (HtmlService, XFrameOptionsMode.ALLOWALL so
   GitHub Pages can embed it in an iframe). This page has NO UI for a human — its only job is to
   relay two things between the GitHub Pages parent and the google.script.run RPC surface

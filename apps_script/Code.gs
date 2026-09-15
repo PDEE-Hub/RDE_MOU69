@@ -31,12 +31,15 @@ function doGet(e) {
   const action = (e && e.parameter && e.parameter.action) || '';
   const view = (e && e.parameter && e.parameter.view) || '';
   try {
-    // Step 5B.1/5B.2: the only new route. Existing action=health/action=bootstrap behavior below
-    // is completely untouched — this is checked first only because `view` and `action` are
-    // different query params entirely, never a behavior change to the JSON GET API.
+    // Step 5B.1/5B.2/5B.3 route — kept (unused by the frontend as of 5B.4, see api_client.js's
+    // header comment) rather than deleted; costs nothing to leave and avoids a destructive diff.
     if (view === 'write_bridge') return renderWriteBridge_(e);
     if (action === 'health') return jsonOut(handleHealth());
     if (action === 'bootstrap') return jsonOut(handleBootstrap(e.parameter.fiscal_year));
+    // Step 5B.4: the only new route the frontend actually uses now. No auth required — requestId
+    // is a correlation id, not an authorization credential (§5) — and it never exposes anything
+    // beyond the same sanitized result processWriteRequest_ already produced and doPost cached.
+    if (action === 'writeStatus') return jsonOut(handleWriteStatus_(e.parameter.requestId));
     return jsonOut({ ok: false, error: 'unknown_action', action: action });
   } catch (err) {
     return jsonOut({ ok: false, error: String(err && err.message || err) });
@@ -422,25 +425,85 @@ function processWriteRequest_(body) {
   }
 }
 
-// doPost — kept as a direct write entry point alongside the bridge (Step 5B.1 §10, "Preferred"):
-// useful for server-to-server/curl diagnostics without a browser, and costs nothing extra since
-// it's a two-line wrapper around processWriteRequest_ — no logic is duplicated. The GitHub Pages
-// FRONTEND no longer calls this at all (see api_client.js) because a browser silently drops the
-// response of a cross-origin fetch() POST to this URL without an Access-Control-Allow-Origin
-// header, which Apps Script Web Apps don't add by default.
+// ── Write result cache (Step 5B.4 §4) — a real HTML form POST navigates the target iframe away
+// from GitHub Pages entirely, so the frontend can never read doPost's HTTP response body (that's
+// exactly why 5B.1-5B.3's fetch()/postMessage bridges existed and kept failing in production).
+// Instead doPost stores a SANITIZED copy of whatever processWriteRequest_ already returned,
+// keyed by the client's own requestId, and the frontend retrieves it via the ordinary GET
+// mechanism (action=writeStatus) that health/bootstrap have always used reliably. ──
+const WRITE_RESULT_CACHE_PREFIX = 'MOU69_WRITE_RESULT_';
+const WRITE_RESULT_CACHE_TTL_SECONDS = 300;
+
+// Only ever copies specific known-safe fields out of `result` — never authToken, never the
+// original request body, never a Script Property, never free-text KPI narrative. Every outcome
+// processWriteRequest_ can return (success, DUPLICATE_REQUEST, and every error code) is cached,
+// not a hand-picked subset — the client must be able to resolve ANY final outcome by polling, not
+// just the "expected" ones, or it would just sit there until WRITE_STATUS_TIMEOUT for anything
+// this function didn't happen to list.
+function cacheWriteResult_(requestId, result) {
+  const safe = {
+    ok: !!(result && result.ok),
+    code: (result && result.code) || (result && result.ok ? 'OK' : 'ERROR'),
+    message: (result && result.message) || '',
+    requestId: requestId,
+    action: (result && result.action) || '',
+    duplicate: !!(result && result.duplicate),
+    timestamp: new Date().toISOString(),
+  };
+  // Safe entity/status info a caller may need (§4) — never anything beyond these two identifiers.
+  if (result && result.recordId) safe.recordId = result.recordId;
+  if (result && result.version !== undefined) safe.version = result.version;
+  try {
+    CacheService.getScriptCache().put(WRITE_RESULT_CACHE_PREFIX + requestId, JSON.stringify(safe), WRITE_RESULT_CACHE_TTL_SECONDS);
+  } catch (e) { /* best-effort — if this ever fails, the client's poll simply times out and the
+                    same requestId can be queried again (idempotency is unaffected either way) */ }
+  return safe;
+}
+
+// action=writeStatus (§5) — no auth: requestId is a correlation id, not a credential. Returns
+// {ok:true, pending:true, requestId} while the cache has nothing yet (still writing, or the
+// entry expired), or the cached sanitized result once doPost has stored one. Never exposes the
+// original payload/body — only ever what cacheWriteResult_ chose to store.
+function handleWriteStatus_(requestId) {
+  if (!validRequestId_(requestId)) return { ok: false, code: 'INVALID_REQUEST', message: 'requestId is required.' };
+  let raw = null;
+  try { raw = CacheService.getScriptCache().get(WRITE_RESULT_CACHE_PREFIX + requestId); } catch (e) { raw = null; }
+  if (!raw) return { ok: true, pending: true, requestId: requestId };
+  try { return JSON.parse(raw); } catch (e) { return { ok: true, pending: true, requestId: requestId }; }
+}
+
+// doPost — kept as a direct write entry point (Step 5B.1 §10, "Preferred"): useful for
+// server-to-server/curl diagnostics without a browser, and costs nothing extra since it's a thin
+// wrapper around processWriteRequest_ — no logic is duplicated. Accepts EITHER an existing JSON
+// body (e.postData.contents, e.g. from curl) OR a form-encoded `payload` field (Step 5B.4 §3 —
+// e.parameter.payload, from api_client.js's hidden-form POST) so both transports share the exact
+// same processor. The GitHub Pages frontend now uses the form-POST path exclusively and never
+// reads this response directly (see api_client.js) — that's what the write-result cache above and
+// action=writeStatus are for.
 function doPost(e) {
   let body;
   try {
-    body = (e && e.postData && e.postData.contents) ? JSON.parse(e.postData.contents) : {};
+    if (e && e.parameter && e.parameter.payload) {
+      body = JSON.parse(e.parameter.payload);
+    } else {
+      body = (e && e.postData && e.postData.contents) ? JSON.parse(e.postData.contents) : {};
+    }
   } catch (parseErr) {
-    return jsonOut({ ok: false, code: 'INVALID_REQUEST', message: 'Malformed JSON body.' });
+    return jsonOut({ ok: false, code: 'INVALID_REQUEST', message: 'Malformed request body.' });
   }
-  return jsonOut(processWriteRequest_(body));
+  const result = processWriteRequest_(body);
+  const requestId = (body && body.requestId) ? String(body.requestId) : '';
+  if (requestId) cacheWriteResult_(requestId, result);
+  return jsonOut(result);
 }
 
 // ── Bridge RPC surface (Step 5B.1) — PUBLIC functions (no trailing _) so google.script.run can
 // call them from Bridge.html. Neither does anything processWriteRequest_/the sheets above don't
-// already do; they're just the google.script.run-callable entry points. ──
+// already do; they're just the google.script.run-callable entry points.
+// STEP 5B.4: dead code as of this phase — the frontend now uses doPost (form POST) +
+// handleWriteStatus_ (GET polling) instead of this MessageChannel/google.script.run path. Kept
+// rather than deleted (see Bridge.html's own note); harmless either way since bridgeWrite still
+// only ever calls processWriteRequest_, never anything duplicated. ──
 
 // Called by Bridge.html for BRIDGE_WRITE. `body` arrives already as a plain JS object —
 // google.script.run deserializes the argument for us; no JSON.parse needed here.
