@@ -1,33 +1,43 @@
 <!--
-  Bridge.html — Step 5B.2 CORS-safe write transport (MessageChannel handshake).
+  Bridge.html — Step 5B.3 CORS-safe write transport (parent-initiated MessageChannel handshake).
 
   Served by Code.gs's doGet at ?view=write_bridge (HtmlService, XFrameOptionsMode.ALLOWALL so
   GitHub Pages can embed it in an iframe). This page has NO UI for a human — its only job is to
-  relay two things between the GitHub Pages TOP window and the google.script.run RPC surface
+  relay two things between the GitHub Pages parent and the google.script.run RPC surface
   (bridgeWrite/bridgeHealth in Code.gs).
 
-  Why MessageChannel instead of plain window.postMessage for everything: Apps Script's
-  HtmlService actually nests this page inside a script.google.com wrapper iframe, which itself
-  contains the *.googleusercontent.com sandbox iframe this script really executes in. The parent
-  page's own iframe.contentWindow is therefore NOT the window this script runs in, so a naive
-  `event.source === iframe.contentWindow` check on the parent side rejects every legitimate
-  message from here. A MessagePort sidesteps that entirely: this page creates the channel itself
-  and hands the parent one port (transferred inside the very first, and ONLY ever window-level,
-  message — window.top.postMessage, not window.parent, since window.top is the actual GitHub
-  page when this is embedded there through however many Google wrapper frames sit in between).
-  Every request/response after that travels over that dedicated port — no more window-level
-  postMessage, so which nested frame this script executes in stops mattering.
+  Why the PARENT initiates (5B.3), not this page (5B.2's approach): Apps Script's HtmlService
+  nests this page inside a script.google.com wrapper iframe, which itself contains the
+  *.googleusercontent.com sandbox iframe this script really executes in. From inside that
+  sandbox, window.top is NOT the GitHub page — it's the sandbox/wrapper itself — so
+  `window.top.postMessage(..., 'https://pdee-hub.github.io', ...)` (5B.2) failed at the browser
+  level with a target-origin mismatch before the message could even be sent. The GitHub parent,
+  by contrast, CAN reach this exact frame directly: it reads the inner sandbox WindowProxy via
+  `iframe.contentWindow.frames[0]` (a cross-origin object, but `.frames`/`.postMessage` are on
+  the browser's own safe allowlist) and posts a message straight to it.
 
-    this page --window.top.postMessage(BRIDGE_READY, GitHub origin, [port2])--> GitHub parent
-    GitHub parent --port.postMessage(BRIDGE_WRITE/BRIDGE_HEALTH)--> this page (via port1)
+    GitHub parent --innerWindow.postMessage(BRIDGE_INIT, '*', [port2])--> this page
+    this page --port1.postMessage(BRIDGE_READY)--> GitHub parent (over the now-shared port)
+    GitHub parent --port.postMessage(BRIDGE_WRITE/BRIDGE_HEALTH)--> this page (via the port)
     this page --google.script.run--> Apps Script server (processWriteRequest_)
     this page <--result/error-- Apps Script server
-    this page --port1.postMessage(BRIDGE_RESPONSE)--> GitHub parent
+    this page --port.postMessage(BRIDGE_RESPONSE)--> GitHub parent
 
-  bridgeSession below is a handshake nonce the server injected (see Code.gs's renderWriteBridge_)
-  from the query string the parent generated — it is NOT the write auth token. If the server
-  refused to hand this page a valid nonce (missing/malformed), this script does nothing at all:
-  no channel, no READY, so the parent simply times out rather than trusting an unverified session.
+  targetOrigin '*' on the parent's OUTGOING BRIDGE_INIT is acceptable (and unavoidable — the
+  parent cannot know this frame's exact googleusercontent.com origin in advance) precisely
+  because that one message carries nothing but a random per-session nonce and a MessagePort — no
+  authToken, no KPI payload — and is addressed to a WindowProxy the parent itself just selected.
+  This page still validates the INCOMING BRIDGE_INIT strictly before trusting it at all: exact
+  GitHub origin, correct channel/type, a nonce matching what the server injected into this page
+  (from the query string the parent generated), and exactly one transferred port. Only after all
+  of that does this page reply READY — over the now-established port, never window-level again.
+  Every later message (including every HEALTH/WRITE call, which may carry authToken) travels only
+  over that port; this page's ONE window-message listener only ever accepts BRIDGE_INIT.
+
+  bridgeSession below is that handshake nonce, injected by Code.gs's renderWriteBridge_ from the
+  query string — it is NOT the write auth token. If the server refused to hand this page a valid
+  nonce (missing/malformed), this script does nothing at all: no listener even matters, since it
+  would refuse every INIT anyway — the parent simply times out.
 
   No third-party library. No UI. Never logs the request body (it may contain authToken) or any
   token/nonce value — only channel/type/messageId/ok get referenced in code, nothing is printed.
@@ -40,25 +50,25 @@
 (function () {
   'use strict';
   var CHANNEL = 'MOU69_WRITE_BRIDGE';
-  // The only parent this bridge ever targets. Static, known value (the dashboard's own GitHub
-  // Pages origin) — never '*' — so the READY handshake (and, if it somehow mattered, anything
-  // else) can only ever be delivered to the genuine top page.
+  // The only origin this page ever accepts BRIDGE_INIT from — the dashboard's own GitHub Pages
+  // origin, static and known, never derived from anything the message itself claims.
   var PARENT_ORIGIN = 'https://pdee-hub.github.io';
   var BRIDGE_SESSION = <?!= JSON.stringify(bridgeSession) ?>;
 
   if (!BRIDGE_SESSION) return; // server did not hand us a valid session nonce — stay silent
 
-  var channel = new MessageChannel();
-  var port1 = channel.port1;
+  var bridgePort = null;
 
   function respond(messageId, ok, result, errorCode, errorMessage) {
+    if (!bridgePort) return;
     var msg = { channel: CHANNEL, type: 'BRIDGE_RESPONSE', bridgeSession: BRIDGE_SESSION, messageId: messageId, ok: ok };
     if (ok) msg.result = result;
     else msg.error = { code: errorCode || 'BRIDGE_ERROR', message: errorMessage || 'Bridge request failed.' };
-    port1.postMessage(msg);
+    bridgePort.postMessage(msg);
   }
 
-  port1.onmessage = function (event) {
+  // Steady-state RPC over the established port — never window-level postMessage.
+  function handleRpc(event) {
     var data = event.data;
     if (!data || data.channel !== CHANNEL || data.bridgeSession !== BRIDGE_SESSION) return;
 
@@ -79,15 +89,24 @@
         .bridgeWrite(data.body);
       return;
     }
-  };
+  }
 
-  // The one and only window-level message this page ever sends: hand port2 to the real top
-  // window, carrying the same session nonce the parent will check against what it generated.
-  window.top.postMessage(
-    { channel: CHANNEL, type: 'BRIDGE_READY', bridgeSession: BRIDGE_SESSION },
-    PARENT_ORIGIN,
-    [channel.port2]
-  );
+  // The ONE window-level listener this page has. Accepts only BRIDGE_INIT, and only once all of:
+  // exact GitHub origin, correct channel/type, matching session nonce, and exactly one
+  // transferred MessagePort. Any single mismatch and the message is silently ignored.
+  window.addEventListener('message', function (event) {
+    if (bridgePort) return; // already handshaken — ignore a stray repeat INIT
+    if (event.origin !== PARENT_ORIGIN) return;
+    var data = event.data;
+    if (!data || data.channel !== CHANNEL || data.type !== 'BRIDGE_INIT') return;
+    if (data.bridgeSession !== BRIDGE_SESSION) return;
+    if (!event.ports || event.ports.length !== 1) return;
+
+    bridgePort = event.ports[0];
+    bridgePort.onmessage = handleRpc;
+    bridgePort.start();
+    bridgePort.postMessage({ channel: CHANNEL, type: 'BRIDGE_READY', bridgeSession: BRIDGE_SESSION });
+  }, false);
 })();
 </script>
 </body>

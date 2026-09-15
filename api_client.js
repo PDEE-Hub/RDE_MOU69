@@ -127,32 +127,43 @@ function apiRequestId() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// STEP 5B.1/5B.2 — CORS-safe write transport: hidden iframe -> google.script.run, replacing the
-// direct fetch() POST used through commit ab14576 (Apps Script Web Apps don't send
+// STEP 5B.1/5B.2/5B.3 — CORS-safe write transport: hidden iframe -> google.script.run, replacing
+// the direct fetch() POST used through commit ab14576 (Apps Script Web Apps don't send
 // Access-Control-Allow-Origin on a POST response by default, so a cors-mode fetch() throws
 // "Failed to fetch" even on a successful write — google.script.run isn't subject to CORS at all).
 //
-// 5B.2 fix: Apps Script's HtmlService actually nests the served page inside a Google
-// script.google.com wrapper iframe, which itself contains a *.googleusercontent.com sandbox
-// iframe that Bridge.html really runs in. That means the window that posts BRIDGE_READY is NOT
-// this page's own `iframe.contentWindow` — checking `event.source === iframe.contentWindow`
-// (5B.1's approach) rejects every legitimate READY. Fixed by switching the handshake to a
-// MessageChannel: Bridge.html creates the channel itself and transfers port2 to window.top (this
-// page) inside the READY message; every request/response after that travels over that dedicated
-// MessagePort, never window-level postMessage again, so which nested frame Bridge.html actually
-// runs in stops mattering. The READY message itself is still validated on three independent axes
-// (channel+type, a random per-session nonce this page generated, and a strict Apps Script sandbox
-// origin check) before its port is ever trusted — see _bridgeWindowMessageHandler below.
+// 5B.2 tried: Bridge.html creates a MessageChannel itself and sends READY (with the transferred
+// port) via window.top.postMessage. That FAILED in production: Apps Script's HtmlService nests
+// the served page inside a script.google.com wrapper iframe, which itself contains the
+// *.googleusercontent.com sandbox iframe Bridge.html really executes in — and that sandbox's OWN
+// window.top is itself (or the googleusercontent wrapper), never the GitHub page, so
+// `window.top.postMessage(..., 'https://pdee-hub.github.io', ...)` threw a target-origin mismatch
+// at the browser level before the message could even be sent.
+//
+// 5B.3 fix: flip who initiates. This page (the parent) reads the inner sandbox WindowProxy via
+// `bridgeIframe.contentWindow.frames[0]` (only `.frames`/`.length`/`.postMessage` are ever
+// touched on that cross-origin object — never `.document`), creates the MessageChannel itself,
+// and sends BRIDGE_INIT with the transferred port DIRECTLY to that WindowProxy with
+// targetOrigin '*'. '*' is acceptable here ONLY because this one bootstrap message carries
+// nothing but a random per-session nonce and a MessagePort — no authToken, no KPI payload — and
+// is addressed to a WindowProxy this page itself just selected (never attacker-influenced).
+// Bridge.html then validates that INIT (exact GitHub origin + channel/type + matching nonce +
+// exactly one port) before trusting it, and replies READY over the now-established port. Every
+// message after that — including every later HEALTH/WRITE call carrying authToken — travels only
+// over that dedicated MessagePort; there is no window-level postMessage anywhere in the RPC path,
+// and Bridge.html's one remaining window-message listener only ever accepts BRIDGE_INIT.
 //
 // A single hidden iframe (id="mou69-write-bridge") is created once and reused for the whole page
-// session — never recreated per write.
+// session — never recreated per write; only the INIT handshake step is retried (new
+// MessageChannel each attempt) until the inner frame exists and answers, or BRIDGE_READY_TIMEOUT_MS.
 // ═══════════════════════════════════════════════════════════
 const BRIDGE_CHANNEL = 'MOU69_WRITE_BRIDGE';
 const BRIDGE_READY_TIMEOUT_MS = 10000;
 const BRIDGE_RPC_TIMEOUT_MS = 18000;
+const BRIDGE_INIT_RETRY_MS = 150;
 
-// Handshake nonce only — proves "this READY answers the iframe THIS page just created," nothing
-// more. NEVER the write auth token (that's MOU69_WRITE_TOKEN, checked server-side in
+// Handshake nonce only — proves "this INIT/READY answers the iframe THIS page just created,"
+// nothing more. NEVER the write auth token (that's MOU69_WRITE_TOKEN, checked server-side in
 // checkAuth_ — completely separate). 128 bits, regenerated fresh per bridge session.
 function generateBridgeSessionId_() {
   const bytes = new Uint8Array(16);
@@ -160,43 +171,16 @@ function generateBridgeSessionId_() {
   return Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
 }
 
-// Strict allowlist, not a broad suffix match: Apps Script serves sandboxed HTML from
-// script.googleusercontent.com itself or a "<prefix>-script.googleusercontent.com" subdomain —
-// never accept googleusercontent.com generally (that's shared across many unrelated Google
-// products/user content, far too broad for a security check).
-function isStrictBridgeOrigin_(origin) {
-  let u;
-  try { u = new URL(origin); } catch (e) { return false; }
-  if (u.protocol !== 'https:') return false;
-  return u.hostname === 'script.googleusercontent.com' || u.hostname.endsWith('-script.googleusercontent.com');
-}
-
 let _bridgeIframe = null;
 let _bridgeSessionId = null; // this page's own random nonce for the current handshake
-let _bridgePort = null;      // the MessagePort transferred to us once READY is verified
+let _bridgePort = null;      // the MessagePort this page keeps once Bridge.html answers READY on it
 let _bridgeReadyPromise = null;
-let _bridgeReadyResolve = null;
+let _bridgePollHandle = null;
+let _bridgeTimeoutHandle = null;
 const _bridgePending = {}; // messageId -> { resolve, timeoutHandle }
 
-// Handles ONLY the initial BRIDGE_READY handshake (still a window-level postMessage, since that's
-// the one message MessageChannel can't avoid — a port has to be delivered somehow). Every check
-// below is independent and all must pass; none is skippable.
-function _bridgeWindowMessageHandler(event) {
-  if (_bridgePort) return; // already handshaken this session — a stray repeat is simply ignored
-  const data = event.data;
-  if (!data || data.channel !== BRIDGE_CHANNEL || data.type !== 'BRIDGE_READY') return; // (A)(B)
-  if (!_bridgeSessionId || data.bridgeSession !== _bridgeSessionId) return; // (C) must match the nonce THIS page generated
-  if (!isStrictBridgeOrigin_(event.origin)) return; // (D) strict Apps Script sandbox origin only
-  if (!event.ports || event.ports.length !== 1) return; // (E) exactly one transferred MessagePort
-
-  _bridgePort = event.ports[0];
-  _bridgePort.onmessage = _bridgePortMessageHandler;
-  _bridgePort.start();
-  if (_bridgeReadyResolve) { _bridgeReadyResolve(); _bridgeReadyResolve = null; }
-}
-
-// All request/response traffic after the handshake — no window-level postMessage, no dependency
-// on which nested frame Bridge.html happens to run in.
+// Steady-state RPC handler — everything AFTER the handshake, over the dedicated port only. No
+// window-level postMessage, no dependency on which nested frame Bridge.html happens to run in.
 function _bridgePortMessageHandler(event) {
   const data = event.data;
   if (!data || data.channel !== BRIDGE_CHANNEL || data.bridgeSession !== _bridgeSessionId || data.type !== 'BRIDGE_RESPONSE') return;
@@ -215,8 +199,6 @@ function ensureBridgeReady() {
   _bridgeReadyPromise = new Promise(function (resolve, reject) {
     if (!API_BASE_URL) { reject(new Error('API_BASE_URL not configured')); return; }
     _bridgeSessionId = generateBridgeSessionId_();
-    _bridgeReadyResolve = resolve;
-    window.addEventListener('message', _bridgeWindowMessageHandler, false);
 
     const iframe = document.createElement('iframe');
     iframe.id = 'mou69-write-bridge';
@@ -228,20 +210,65 @@ function ensureBridgeReady() {
     document.body.appendChild(iframe);
     _bridgeIframe = iframe;
 
-    setTimeout(function () {
-      reject(new Error('Write bridge did not become ready in time.')); // no-op if already resolved
+    let settled = false;
+
+    // §1/§7: the inner Apps Script sandbox frame (where Bridge.html actually runs) may not exist
+    // in the DOM the instant the outer iframe's src is set, and even once it does, Bridge.html's
+    // own script may not have attached its listener yet — so this retries the WHOLE
+    // discover+send step (a fresh MessageChannel each time) until a READY comes back. Only
+    // .frames/.length/.postMessage are ever touched on the cross-origin WindowProxy — never
+    // .document — per the browser's own safe cross-origin Window allowlist.
+    function trySendInit() {
+      if (settled) return;
+      let innerWindow = null;
+      try {
+        const cw = iframe.contentWindow;
+        if (cw && cw.frames && cw.frames.length > 0) innerWindow = cw.frames[0];
+      } catch (e) { innerWindow = null; }
+      if (!innerWindow) return;
+
+      const channel = new MessageChannel();
+      const port1 = channel.port1;
+      port1.onmessage = function (event) {
+        if (settled) return;
+        const data = event.data;
+        if (!data || data.channel !== BRIDGE_CHANNEL || data.type !== 'BRIDGE_READY' || data.bridgeSession !== _bridgeSessionId) return;
+        settled = true;
+        if (_bridgePollHandle) { clearInterval(_bridgePollHandle); _bridgePollHandle = null; }
+        if (_bridgeTimeoutHandle) { clearTimeout(_bridgeTimeoutHandle); _bridgeTimeoutHandle = null; }
+        port1.onmessage = _bridgePortMessageHandler; // switch to steady-state RPC handling
+        _bridgePort = port1;
+        resolve();
+      };
+      port1.start();
+      // §3: targetOrigin '*' — ONLY for this one bootstrap message, which carries nothing but a
+      // random nonce and a MessagePort, sent to a WindowProxy THIS page itself just selected.
+      // Never used again after this; no authToken/KPI payload ever travels this way.
+      innerWindow.postMessage({ channel: BRIDGE_CHANNEL, type: 'BRIDGE_INIT', bridgeSession: _bridgeSessionId }, '*', [channel.port2]);
+    }
+
+    _bridgeTimeoutHandle = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      if (_bridgePollHandle) { clearInterval(_bridgePollHandle); _bridgePollHandle = null; }
+      reject(new Error('Write bridge did not become ready in time.'));
     }, BRIDGE_READY_TIMEOUT_MS);
+
+    _bridgePollHandle = setInterval(trySendInit, BRIDGE_INIT_RETRY_MS);
+    trySendInit(); // also try immediately, don't wait a full poll interval
   });
   return _bridgeReadyPromise;
 }
 
-// Full reset (§9): closes the port, drops the iframe, fails every still-pending call, and clears
-// all handshake state so the next ensureBridgeReady() performs a completely fresh handshake with
-// a new session nonce. Not called automatically anywhere in this phase — kept for future use.
+// Full reset (§9): closes the port, drops the iframe, fails every still-pending call, clears any
+// in-flight handshake timers, and resets all state so the next ensureBridgeReady() performs a
+// completely fresh handshake with a new session nonce and a new (single) iframe. Not called
+// automatically anywhere in this phase — kept for future use.
 function resetBridge() {
+  if (_bridgePollHandle) { clearInterval(_bridgePollHandle); _bridgePollHandle = null; }
+  if (_bridgeTimeoutHandle) { clearTimeout(_bridgeTimeoutHandle); _bridgeTimeoutHandle = null; }
   if (_bridgePort) { try { _bridgePort.close(); } catch (e) {} }
   if (_bridgeIframe && _bridgeIframe.parentNode) _bridgeIframe.parentNode.removeChild(_bridgeIframe);
-  window.removeEventListener('message', _bridgeWindowMessageHandler, false);
   Object.keys(_bridgePending).forEach(function (id) {
     clearTimeout(_bridgePending[id].timeoutHandle);
     _bridgePending[id].resolve({ ok: false, code: 'BRIDGE_ERROR', message: 'Bridge was reset.' });
@@ -251,7 +278,6 @@ function resetBridge() {
   _bridgePort = null;
   _bridgeSessionId = null;
   _bridgeReadyPromise = null;
-  _bridgeReadyResolve = null;
 }
 
 function bridgeCall_(type, body, messageId) {
