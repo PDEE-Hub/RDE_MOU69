@@ -316,12 +316,19 @@ function handleConfirmEntry_(body, requestId, ctx) {
 }
 
 // ── doPost — the ONLY write entry point. Minimal, allowlisted, never a generic
-// sheet/column/range passthrough (§4). Every stateful check (auth, idempotency, period status)
-// happens AFTER the lock is acquired (§7), so two concurrent requests can never both pass a
-// check that's no longer true by the time they write. ──
+// sheet/column/range passthrough (§4).
+//
+// Pre-deployment hardening: auth is checked TWICE, deliberately —
+//   (1) BEFORE acquiring ScriptLock, so an unauthenticated/public request is rejected on a cheap
+//       PropertiesService read and never gets to contend for the lock at all (a flood of bad
+//       requests can't starve a legitimate writer waiting on the lock).
+//   (2) AGAIN immediately after the lock is held, alongside idempotency and period status — the
+//       only checks that are allowed to be trusted are the ones made while holding the lock,
+//       since that's the only point nothing else can change out from under this request.
+// Neither check replaces the other. ──
 function doPost(e) {
-  const lock = LockService.getScriptLock();
   let gotLock = false;
+  let lock = null;
   try {
     let body;
     try {
@@ -335,12 +342,19 @@ function doPost(e) {
       return jsonOut({ ok: false, code: 'UNKNOWN_ACTION', message: 'Unknown or missing action.' });
     }
 
+    // (1) Pre-lock auth gate — an unauthenticated caller is turned away before it can ever
+    // contend for the ScriptLock.
+    if (!checkAuth_(body.authToken)) {
+      return jsonOut({ ok: false, code: 'UNAUTHORIZED', message: 'Invalid or missing auth token.' });
+    }
+
+    lock = LockService.getScriptLock();
     gotLock = lock.tryLock(10000);
     if (!gotLock) {
       return jsonOut({ ok: false, code: 'WRITE_LOCK_TIMEOUT', message: 'Server busy, try again.' });
     }
 
-    // Everything below runs under the lock — re-checked fresh, never trusting a pre-lock check.
+    // (2) Post-lock re-checks — nothing from before the lock is trusted here.
     if (!checkAuth_(body.authToken)) {
       return jsonOut({ ok: false, code: 'UNAUTHORIZED', message: 'Invalid or missing auth token.' });
     }
@@ -357,7 +371,8 @@ function doPost(e) {
       return jsonOut(handleWriteSmokeTest_(body, requestId));
     }
 
-    // saveDraft / submitEntry / confirmEntry — all KPI writes, all period-gated.
+    // saveDraft / submitEntry / confirmEntry — all KPI writes, all period-gated (re-checked here,
+    // under the lock — current record/version is likewise read fresh inside writeKpiResult_).
     const v = validateKpiWriteRequest_(body);
     if (!v.ok) return jsonOut(v);
     const period = assertQuarterWritable_(v.fiscalYear, v.quarter);

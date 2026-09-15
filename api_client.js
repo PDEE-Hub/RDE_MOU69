@@ -127,17 +127,26 @@ function apiRequestId() {
 }
 
 // `action` must be one of the server's own allowlisted actions — this function is not a generic
-// write API, it just forwards to one. Deliberately sends a plain string body with NO Content-Type
-// header: that keeps the request a CORS "simple request" (no preflight), which Apps Script Web
-// Apps don't handle by default — see Code.gs's doPost comment. e.postData.contents on the server
-// still parses fine as JSON regardless of the (unset) content type.
+// write API, it just forwards to one. `authToken` travels inside the JSON body (never a header,
+// never a query string — plain HTTPS body is enough since the whole request is already TLS-
+// encrypted). Content-Type is explicitly 'text/plain;charset=utf-8' — one of the three
+// CORS-safelisted content types — and no other header (no Authorization, no X-API-Key,
+// no credentials:'include') is set, so this stays a CORS "simple request" with no OPTIONS
+// preflight, which Apps Script Web Apps don't handle by default. e.postData.contents on the
+// server parses fine as JSON regardless of this declared content type. redirect:'follow' is
+// explicit because ContentService responses come back through a redirect.
 async function apiWrite(action, fields) {
   if (!API_BASE_URL) return { ok: false, code: 'NOT_CONFIGURED' };
   const token = apiGetWriteToken();
   if (!token) return { ok: false, code: 'UNAUTHORIZED', message: 'No write token set for this session — call apiSetWriteToken(token) first.' };
   const body = Object.assign({ action: action, authToken: token, requestId: apiRequestId() }, fields);
   try {
-    const res = await fetch(API_BASE_URL, { method: 'POST', body: JSON.stringify(body) });
+    const res = await fetch(API_BASE_URL, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+    });
     if (!res.ok) return { ok: false, code: 'HTTP_ERROR', message: 'http_' + res.status };
     return await res.json();
   } catch (e) {
