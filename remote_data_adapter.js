@@ -33,7 +33,7 @@ function remoteNormalizeQuarter(raw) {
   return REMOTE_QUARTER_MAP[String(raw || '').trim().toLowerCase()] || null;
 }
 
-let remotePilotState = { mode: 'offline', records: {} }; // records: { [kpiId]: { [q]: builtRecord } }
+let remotePilotState = { mode: 'offline', records: {}, periodControl: null }; // records: { [kpiId]: { [q]: builtRecord } }
 
 // Same rule getQuarterInput() itself uses to decide "score a person confirmed" vs "score computed
 // from a real numeric result" -- duplicated here (not imported) because this file must be able to
@@ -158,9 +158,9 @@ function remoteBuildRecords(payload) {
 // reuses that single network call rather than fetching bootstrap a second time.
 function remotePilotOnBootstrap(payload) {
   try {
-    remotePilotState = { mode: 'online', records: remoteBuildRecords(payload) };
+    remotePilotState = { mode: 'online', records: remoteBuildRecords(payload), periodControl: payload.periodControl || null };
   } catch (e) {
-    remotePilotState = { mode: 'offline', records: {} }; // fail closed -> pure local/baseline fallback
+    remotePilotState = { mode: 'offline', records: {}, periodControl: null }; // fail closed -> pure local/baseline fallback
   }
   // The first render already happened before this async fetch resolved -- refresh the three
   // views that read through getQuarterInput/publishedQuarterReport, same re-render pattern the
@@ -179,4 +179,11 @@ function remotePilotGetInput(kpiId, q) {
 function remotePilotGetReport(kpiId, q) {
   if (remotePilotState.mode !== 'online') return null;
   return (remotePilotState.records[kpiId] && remotePilotState.records[kpiId][q]) || null;
+}
+// Step 5B §15 prepared hook — NOT called by any render/entry code yet (deliberately, to avoid
+// regression risk this round). Returns the server's PERIOD_CONTROL map ({Q1:'historical',...})
+// when the last successful bootstrap included one, else null (caller must keep using the local
+// QUARTER_STATUS fallback, which is already safe — never 'open').
+function remoteGetPeriodControl() {
+  return remotePilotState.mode === 'online' ? (remotePilotState.periodControl || null) : null;
 }

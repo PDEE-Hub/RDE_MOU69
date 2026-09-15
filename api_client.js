@@ -1,9 +1,16 @@
-// api_client.js — Phase 1: READ-ONLY bridge to MOU69_DB via Apps Script (see api_config.js).
+// api_client.js — READ bridge to MOU69_DB via Apps Script (see api_config.js), plus (Step 5B)
+// the client side of the secure central Write API. See apps_script/Code.gs's doPost for the
+// server enforcement this all depends on.
 //
-// Scope discipline (do not expand without a new phase sign-off):
-//   - Only calls `health` and `bootstrap` — no save/write actions exist yet.
+// Scope discipline:
+//   - Read (health/bootstrap): unchanged since Phase 1.
+//   - Write (apiWrite* below): calls only the server's own allowlisted actions
+//     (writeSmokeTest/saveDraft/submitEntry/confirmEntry) — this file never lets a caller name a
+//     sheet/column/range. NOT wired into any Entry UI button yet (Step 5C's job) — every quarter's
+//     server-side period status stays non-'open' this phase, so only writeSmokeTest can succeed.
 //   - Never touches the existing localStorage keys (`mou69_uat_q3_v1`, `mou69_v1_overrides`) —
-//     fetched data lands in its own new key (REMOTE_CACHE_KEY) only.
+//     fetched data lands in its own new key (REMOTE_CACHE_KEY) only; the write auth token lives
+//     in memory / sessionStorage only (see WRITE_TOKEN_SESSION_KEY below) — never localStorage.
 //   - Never calls into scoring (engine.js), rendering (app.js), or entry/confirm flows —
 //     wiring fetched data into scores/Home/Overview is a later phase.
 //   - When API_BASE_URL is empty, this file is a no-op: no fetch, no localStorage write, no
@@ -87,3 +94,71 @@ async function initRemoteBootstrap() {
 }
 
 window.addEventListener('DOMContentLoaded', initRemoteBootstrap);
+
+// ═══════════════════════════════════════════════════════════
+// STEP 5B — Secure Write API client. Console/manual-test surface only in this phase; no Entry
+// button calls any of this yet. See apps_script/Code.gs for the server side.
+//
+// Auth token: a human types it in at runtime (apiSetWriteToken) — never hardcoded here, never
+// committed. Kept in a page-memory variable first; sessionStorage is only a same-tab-session
+// convenience so a reload mid-test doesn't force re-entry. Never localStorage (would outlive the
+// tab/session), never included in entry_store.js's UAT export/import (different keys entirely —
+// uatTransferExportPayload only ever reads UAT_TRANSFER_KEYS, which this key is not part of).
+// ═══════════════════════════════════════════════════════════
+const WRITE_TOKEN_SESSION_KEY = 'mou69_write_token_session';
+let _writeTokenMemory = null;
+
+function apiSetWriteToken(token) {
+  _writeTokenMemory = token || null;
+  try {
+    if (token) sessionStorage.setItem(WRITE_TOKEN_SESSION_KEY, token);
+    else sessionStorage.removeItem(WRITE_TOKEN_SESSION_KEY);
+  } catch (e) { /* private mode / quota — the in-memory copy still works for this tab */ }
+}
+function apiGetWriteToken() {
+  if (_writeTokenMemory) return _writeTokenMemory;
+  try { return sessionStorage.getItem(WRITE_TOKEN_SESSION_KEY); } catch (e) { return null; }
+}
+function apiClearWriteToken() { apiSetWriteToken(null); }
+
+function apiRequestId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+}
+
+// `action` must be one of the server's own allowlisted actions — this function is not a generic
+// write API, it just forwards to one. Deliberately sends a plain string body with NO Content-Type
+// header: that keeps the request a CORS "simple request" (no preflight), which Apps Script Web
+// Apps don't handle by default — see Code.gs's doPost comment. e.postData.contents on the server
+// still parses fine as JSON regardless of the (unset) content type.
+async function apiWrite(action, fields) {
+  if (!API_BASE_URL) return { ok: false, code: 'NOT_CONFIGURED' };
+  const token = apiGetWriteToken();
+  if (!token) return { ok: false, code: 'UNAUTHORIZED', message: 'No write token set for this session — call apiSetWriteToken(token) first.' };
+  const body = Object.assign({ action: action, authToken: token, requestId: apiRequestId() }, fields);
+  try {
+    const res = await fetch(API_BASE_URL, { method: 'POST', body: JSON.stringify(body) });
+    if (!res.ok) return { ok: false, code: 'HTTP_ERROR', message: 'http_' + res.status };
+    return await res.json();
+  } catch (e) {
+    return { ok: false, code: 'NETWORK_ERROR', message: e.message || 'network_error' };
+  }
+}
+
+// Writes only AUDIT_LOG (never KPI_RESULT/etc.) — the one action that doesn't depend on any
+// quarter's period status, used to prove the write pipe works without touching KPI data.
+function apiWriteSmokeTest(actorName) {
+  return apiWrite('writeSmokeTest', { actorName: actorName || '', clientInfo: 'RDE_MOU69 dashboard' });
+}
+// These three always return QUARTER_LOCKED/QUARTER_NOT_OPEN/QUARTER_READ_ONLY in this phase —
+// every quarter's server-side period status is non-'open' until a future phase changes that by
+// hand in PERIOD_CONTROL. Kept ready (and correct) for Step 5C to wire into real UI buttons.
+function apiSaveDraft(kpiId, quarter, payload, actorName) {
+  return apiWrite('saveDraft', { fiscalYear: API_FISCAL_YEAR, quarter: quarter, kpiId: kpiId, payload: payload || {}, actorName: actorName || '' });
+}
+function apiSubmitEntry(kpiId, quarter, payload, actorName) {
+  return apiWrite('submitEntry', { fiscalYear: API_FISCAL_YEAR, quarter: quarter, kpiId: kpiId, payload: payload || {}, actorName: actorName || '' });
+}
+function apiConfirmEntry(kpiId, quarter, payload, actorName) {
+  return apiWrite('confirmEntry', { fiscalYear: API_FISCAL_YEAR, quarter: quarter, kpiId: kpiId, payload: payload || {}, actorName: actorName || '' });
+}
