@@ -23,6 +23,24 @@ const ENTRY_FISCAL_MONTHS = [
 ];
 const ENTRY_FISCAL_QUARTER_LABEL = { q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4' };
 
+// ═══════════════════════════════════════════════════════════
+// QUARTER LOCK STATE (Step 4: LOCK Q3 FINAL) — single source of truth for read/write gating.
+// Q1/Q2 = historical (already read-only — seeded from MOU_DATA.quarterly, never routed through
+// this entry system at all). Q3 = locked/final (Q3 Final Snapshot is confirmed in MOU69_DB — no
+// further edits allowed from here). Q4 = not_open (Step 5 — not this round).
+// Every write path in entry_store.js / all_kpis.js must check isQuarterLocked() from here —
+// never hardcode `quarter === 'q3'` / `'Q3'` scattered across files.
+// ═══════════════════════════════════════════════════════════
+const QUARTER_STATUS = { q1: 'historical', q2: 'historical', q3: 'locked', q4: 'not_open' };
+function isQuarterLocked(quarter) { return QUARTER_STATUS[String(quarter || '').toLowerCase()] === 'locked'; }
+// The only quarter this entry form currently reports against (see ENTRY_Q3_MONTHS above) — there
+// is no quarter switcher in this UI yet, so locking this one constant locks the whole "กรอกข้อมูล"
+// write surface. Step 5 (open Q4) needs a real quarter-switch in entry.js, not just a flip here.
+const ENTRY_ACTIVE_QUARTER = 'q3';
+const ENTRY_LOCKED = isQuarterLocked(ENTRY_ACTIVE_QUARTER);
+const ENTRY_LOCK_MESSAGE = 'Q3 ปิดรับข้อมูลแล้ว · Final — ข้อมูลไตรมาส 3 ได้รับการยืนยันและล็อกแล้ว สามารถดูข้อมูลได้อย่างเดียว';
+const ENTRY_LOCK_TOOLTIP = 'Q3 ปิดรับข้อมูลแล้ว — ล็อกเป็น Final ไม่สามารถแก้ไขได้';
+
 // kpiType per brief §1: only two Thai-facing types. Parent/Child is structure, not type.
 // '1.1' is 'investment' — a distinct entry workflow (annual framework + shared raw plan/actual,
 // brief v1.2 §B) though it still scores as an ordinary numeric/linear KPI in engine.js.

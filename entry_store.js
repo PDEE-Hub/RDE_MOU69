@@ -21,6 +21,12 @@ function loadUatStore() {
   } catch (e) { return uatDefaultStore(); }
 }
 function saveUatStore(store) {
+  // Step 4 choke point: this store (entries/actionPlans/criteriaHistory/annualFrameworks/
+  // investmentRaw/issues) is entirely Q3-scoped by design (see file header) — one guard here
+  // blocks every mutator in this file from persisting once Q3 is locked, with no per-call check
+  // needed. Step 5 (Q4) will need this store retargeted anyway (see priorCumulative()'s note
+  // below), not just this guard flipped.
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return;
   try { localStorage.setItem(UAT_KEY, JSON.stringify(store)); } catch (e) {}
 }
 
@@ -35,12 +41,16 @@ function ovrSave(o) {
   try { localStorage.setItem('mou69_v1_overrides', JSON.stringify(o)); } catch (e) {}
 }
 function ovrSet(kpiId, q, value) {
+  // Step 4 choke point: quarter-aware, so Step 5 opening Q4 only needs QUARTER_STATUS.q4
+  // flipped in entry_config.js — this guard already lets non-locked quarters through unchanged.
+  if (isQuarterLocked(q)) return;
   const o = ovrGet();
   if (!o[kpiId]) o[kpiId] = {};
   o[kpiId][q] = value;
   ovrSave(o);
 }
 function ovrClearQuarter(kpiId, q) {
+  if (isQuarterLocked(q)) return;
   const o = ovrGet();
   if (o[kpiId]) { delete o[kpiId][q]; if (Object.keys(o[kpiId]).length === 0) delete o[kpiId]; }
   ovrSave(o);
@@ -145,6 +155,7 @@ function validateNumeric(kpiId) {
   return { ok: issues.length === 0, issues, result };
 }
 function confirmNumeric(kpiId, confirmedBy) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const v = validateNumeric(kpiId);
   if (!v.ok) return { ok: false, issues: v.issues };
   const overrideValue = v.result.cumulative; // linear scoringMethod: raw cumulative value, engine interpolates it
@@ -188,6 +199,7 @@ function getPendingAnnualFrameworkRevision(kpiId) {
   return hist.find(v => v.status === 'pending_admin_confirmation') || null;
 }
 function requestAnnualFrameworkRevision(kpiId, { newAmount, effectiveDate, reason, referenceDoc, evidenceUrl, createdBy }) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const issues = [];
   if (newAmount === null || newAmount === undefined || newAmount === '' || isNaN(Number(newAmount)) || Number(newAmount) <= 0) issues.push('กรุณากรอกกรอบเบิกจ่ายใหม่ (ล้านบาท) ให้ถูกต้อง');
   if (!effectiveDate) issues.push('บังคับกรอกวันที่มีผล');
@@ -208,6 +220,7 @@ function requestAnnualFrameworkRevision(kpiId, { newAmount, effectiveDate, reaso
   return { ok: true };
 }
 function confirmAnnualFrameworkRevision(kpiId, version, { confirmedBy }) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const store = loadUatStore();
   const hist = store.annualFrameworks[kpiId] || getAnnualFrameworkHistory(kpiId).map(v => Object.assign({}, v));
   const rev = hist.find(v => v.version === version);
@@ -221,6 +234,7 @@ function confirmAnnualFrameworkRevision(kpiId, version, { confirmedBy }) {
   return { ok: true };
 }
 function rejectAnnualFrameworkRevision(kpiId, version, { note, confirmedBy }) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const store = loadUatStore();
   const hist = store.annualFrameworks[kpiId] || getAnnualFrameworkHistory(kpiId).map(v => Object.assign({}, v));
   const rev = hist.find(v => v.version === version);
@@ -291,6 +305,7 @@ function validateInvestment() {
   return { ok: issues.length === 0, issues, result };
 }
 function confirmInvestment(confirmedBy) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const v = validateInvestment();
   if (!v.ok) return { ok: false, issues: v.issues };
   ovrSet('1.1.1', 'q3', v.result.pct111);
@@ -337,6 +352,7 @@ function validatePlanMonth(kpiId, monthKey) {
   return { ok: issues.length === 0, issues };
 }
 function submitPlanMonth(kpiId, monthKey) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const v = validatePlanMonth(kpiId, monthKey);
   if (!v.ok) return { ok: false, issues: v.issues };
   const entry = getEntry(kpiId);
@@ -346,6 +362,7 @@ function submitPlanMonth(kpiId, monthKey) {
   return { ok: true };
 }
 function sendBackPlanMonth(kpiId, monthKey, note) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const entry = getEntry(kpiId);
   const m = entry.monthly[monthKey];
   if (!m || m.submission_status !== 'pending_confirmation') return { ok: false, issues: ['รายการนี้ไม่ได้อยู่ในสถานะรอยืนยัน'] };
@@ -449,6 +466,7 @@ function listPendingFrameworkRevisions() {
   return out;
 }
 function confirmPlanMonth(kpiId, monthKey, { confirmedPercent, confirmationNote, confirmedLevel, confirmedBy }) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const kpi = MOU_DATA.kpis[kpiId];
   const entry = getEntry(kpiId);
   const m = entry.monthly[monthKey];
@@ -518,6 +536,7 @@ function getActionPlan(kpiId) {
 }
 // First-time creation only (no baseline yet) — e.g. a project not in Master, or a manual add.
 function createBaselineActionPlan(kpiId, activities) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const store = loadUatStore();
   const existing = store.actionPlans[kpiId] || actionPlanDefault(kpiId);
   if (existing.baseline) return { ok: false, issues: ['มี Baseline Plan อยู่แล้ว ห้ามเขียนทับ — ใช้ขอปรับแผนแทน'] };
@@ -530,6 +549,7 @@ function createBaselineActionPlan(kpiId, activities) {
 }
 // Revision — baseline never overwritten (brief §C4). Requires a reason; evidence optional but recommended.
 function requestActionPlanRevision(kpiId, activities, { reason, evidenceUrl, revisedBy }) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const issues = [];
   if (!reason || !reason.trim()) issues.push('บังคับกรอกเหตุผลในการปรับแผน');
   if (!Array.isArray(activities) || !activities.length) issues.push('กรุณากรอกกิจกรรมอย่างน้อย 1 รายการ');
@@ -634,6 +654,7 @@ function getEffectiveKpi(kpiId) {
   return Object.assign({}, kpi, { thresholds: active.thresholds, criteriaRevisionNote: active.note, criteriaBoardApprovalDate: active.boardApprovalDate });
 }
 function addCriteriaRevision(kpiId, { newThresholds, boardApprovalDate, note, evidenceUrl }) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const issues = [];
   if (!Array.isArray(newThresholds) || newThresholds.length !== 5 || newThresholds.some(v => v === null || v === '' || isNaN(Number(v)))) issues.push('กรุณากรอกเกณฑ์ Level 1-5 ให้ครบและเป็นตัวเลข');
   if (!boardApprovalDate) issues.push('บังคับกรอกวันที่คณะกรรมการ กทท. เห็นชอบ');
@@ -747,6 +768,7 @@ function pilotProgressCount() {
 // audit trail beyond the versions created during this UAT session.
 // ═══════════════════════════════════════════════════════════
 function resetQ3UatData() {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const store = loadUatStore();
   store.entries = {};
   store.investmentRaw = {};
@@ -761,6 +783,7 @@ function resetQ3UatData() {
   });
   saveUatStore(store);
   Object.keys(MOU_DATA.kpis).forEach(id => ovrClearQuarter(id, 'q3'));
+  return { ok: true };
 }
 
 
@@ -883,6 +906,10 @@ function uatCountRecords(value) {
 }
 
 function uatImportData(payload) {
+  // Step 4 §8: Export stays available; Import must never be able to overwrite the Q3 Final
+  // Snapshot. Both transfer keys (mou69_uat_q3_v1, mou69_v1_overrides) are 100% Q3-scoped in
+  // this app today, so a full block here (not a partial per-record filter) is the correct fix.
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const validation = uatValidateImportPayload(payload);
   if (!validation.ok) return validation;
 

@@ -32,6 +32,7 @@ function reportCalculate(id) {
   return {ok:!issues.length,issues,actual:issues.length?null:actual,input,values:v,score:scoreLeafKPI(getEffectiveKpi(id),input,'q3')};
 }
 function reportConfirm(id) {
+  if (isQuarterLocked(ENTRY_ACTIVE_QUARTER)) return { ok: false, code: 'QUARTER_LOCKED', issues: [ENTRY_LOCK_MESSAGE] };
   const result=reportCalculate(id); if(!result.ok)return result;
   const d=reportDraft(id),record={actual:result.actual,quarterlyResult:result.input,values:result.values,summary_text:d.summary_text,issue:Object.assign({},getIssue(id,'q3')),evidence:d.evidence.trim(),confirmedAt:new Date().toISOString()};
   if(id==='2.2')record.monthly=Object.assign({},result.values);
@@ -47,15 +48,16 @@ function reportLeaves(id){const k=MOU_DATA.kpis[id];return !k?[]:k.isLeaf?[k]:ov
 function reportActiveId(){return entryState.activeChild||reportLeaves(entryState.activeKpi)[0]?.id||entryState.activeKpi;}
 function reportFormHtml(id){
   const k=MOU_DATA.kpis[id],config=REPORT_FIELDS[id],d=reportDraft(id);
+  const ro=ENTRY_LOCKED?'disabled':'';
   return `${reportChildPicker(entryState.activeKpi)}<div class="dtl-section-card"><div class="card-title">${id} · ${entryEsc(k.label)}</div>
   <div class="entry-meta-line">ผล Q3 · ${entryEsc(config.method)}</div>
-  ${config.fields.map(([key,label,type])=>`<div class="entry-field-row col"><label>${label}</label><input class="entry-input" type="${type==='text'?'text':'number'}" ${type==='text'?'':'step="any" min="0"'} value="${entryEsc(String(d.values[key]??config.defaults?.[key]??''))}" oninput="reportDraftSet('${id}','v:${key}',this.value)" placeholder="ยังไม่ได้กรอก"></div>`).join('')}
-  <div class="entry-field-row col"><label>สรุปผลการดำเนินงาน / เหตุผลประกอบคะแนน</label><textarea class="entry-input" rows="4" oninput="reportDraftSet('${id}','summary_text',this.value)">${entryEsc(d.summary_text)}</textarea></div>
+  ${config.fields.map(([key,label,type])=>`<div class="entry-field-row col"><label>${label}</label><input class="entry-input" type="${type==='text'?'text':'number'}" ${type==='text'?'':'step="any" min="0"'} value="${entryEsc(String(d.values[key]??config.defaults?.[key]??''))}" ${ro} oninput="reportDraftSet('${id}','v:${key}',this.value)" placeholder="ยังไม่ได้กรอก"></div>`).join('')}
+  <div class="entry-field-row col"><label>สรุปผลการดำเนินงาน / เหตุผลประกอบคะแนน</label><textarea class="entry-input" rows="4" ${ro} oninput="reportDraftSet('${id}','summary_text',this.value)">${entryEsc(d.summary_text)}</textarea></div>
   ${entryIssueBlockHtml(id,'q3','report_'+id)}
-  <div class="entry-field-row col"><label>ลิงก์เอกสารประกอบ (ถ้ามี)</label><input class="entry-input" type="url" value="${entryEsc(d.evidence)}" oninput="reportDraftSet('${id}','evidence',this.value)" placeholder="https://"></div>
-  ${config.human?`<div class="entry-field-row col"><label>คะแนนที่ยืนยันตามเกณฑ์ (1–5; รองรับทศนิยม)</label><input class="entry-input" type="number" min="1" max="5" step="0.0001" value="${d.level??''}" oninput="reportDraftSet('${id}','level',this.value)"></div>`:''}
+  <div class="entry-field-row col"><label>ลิงก์เอกสารประกอบ (ถ้ามี)</label><input class="entry-input" type="url" value="${entryEsc(d.evidence)}" ${ro} oninput="reportDraftSet('${id}','evidence',this.value)" placeholder="https://"></div>
+  ${config.human?`<div class="entry-field-row col"><label>คะแนนที่ยืนยันตามเกณฑ์ (1–5; รองรับทศนิยม)</label><input class="entry-input" type="number" min="1" max="5" step="0.0001" value="${d.level??''}" ${ro} oninput="reportDraftSet('${id}','level',this.value)"></div>`:''}
   <div class="entry-note-small">ยืนยันบันทึกเพื่อส่งข้อมูลไปยังรายละเอียด ภาพรวม และ Home · ค่าร่างไม่แทนผลยืนยันเดิม</div>
-  <div class="entry-btn-row"><button class="entry-btn ghost" onclick="entrySaveDraft()">บันทึกร่าง</button><button class="entry-btn secondary" onclick="reportValidateUi('${id}')">ตรวจสอบข้อมูล</button><button class="entry-btn primary" onclick="reportConfirmUi('${id}')">ยืนยันบันทึก</button></div><div id="reportValidation" class="entry-validate-box"></div></div>`;
+  <div class="entry-btn-row"><button class="entry-btn ghost" ${ro} onclick="entrySaveDraft()">บันทึกร่าง</button><button class="entry-btn secondary" ${ro} onclick="reportValidateUi('${id}')">ตรวจสอบข้อมูล</button><button class="entry-btn primary" ${ro} title="${ENTRY_LOCKED?ENTRY_LOCK_TOOLTIP:''}" onclick="reportConfirmUi('${id}')">ยืนยันบันทึก</button></div><div id="reportValidation" class="entry-validate-box"></div></div>`;
 }
 function reportPreviewHtml(id){const r=reportCalculate(id),k=getEffectiveKpi(id);return `<div class="mini-card"><div class="mini-title">ผลจากข้อมูลที่กำลังกรอก</div><div class="entry-preview-row"><span>ผลการดำเนินงาน</span><b>${entryEsc(String(r.actual??'—'))}</b></div><div class="entry-preview-row"><span>คะแนน</span><b>${r.score.level===null?'—':r.score.level.toFixed(4)}</b></div><div class="entry-note-small">${r.ok?'พร้อมยืนยันบันทึก':r.issues.map(entryEsc).join('<br>')}</div></div><div class="mini-card">${reportCriteriaHtml(k)}</div>`;}
 function reportCriteriaHtml(k){if(k.thresholds.every(x=>x===null))return '<div class="dtl-source-note">ต้นทางไม่ได้ระบุเกณฑ์ตัวเลข 1–5; ใช้แผนงานและคะแนนที่ยืนยัน</div>';return `<div class="mini-title">เกณฑ์คะแนนตาม Excel</div><div class="report-criteria-list">${k.thresholds.map((t,i)=>`<div><span class="ovp-badge" style="background:${LV_COLORS[i+1]};color:#293750">${i+1}</span><span>${entryEsc(String(t??'ยังไม่ระบุ'))}${k.scoringMethod==='milestone_pct'?' ('+Number(t)*100+'%)':''}</span></div>`).join('')}</div>`;}

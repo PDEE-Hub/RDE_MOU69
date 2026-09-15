@@ -99,6 +99,10 @@ function entryHandleImportUat(file) {
 // HEADER / LEFT RAIL
 // ═══════════════════════════════════════════════════════════
 function entryPendingTotal() { return listPendingConfirmations().length + listPendingFrameworkRevisions().length; }
+function entryLockedBannerHtml() {
+  if (!ENTRY_LOCKED) return '';
+  return `<div class="entry-locked-banner"><span class="entry-locked-dot">●</span> ${entryEsc(ENTRY_LOCK_MESSAGE)}</div>`;
+}
 function entryHeaderHtml() {
   const count = pilotProgressCount();
   return `
@@ -106,14 +110,14 @@ function entryHeaderHtml() {
       <div class="entry-header-row">
         <div>
           <div class="dtl-page-title">กรอกผลการดำเนินงาน Q3</div>
-          <div class="entry-header-sub">เมษายน – มิถุนายน 2569 &nbsp;·&nbsp; สถานะ: <b>ทดสอบระบบ (UAT)</b></div>
+          <div class="entry-header-sub">เมษายน – มิถุนายน 2569 &nbsp;·&nbsp; สถานะ: <b>${ENTRY_LOCKED ? 'ปิดรับข้อมูลแล้ว (Locked)' : 'ทดสอบระบบ (UAT)'}</b></div>
         </div>
         <div class="entry-header-right">
           <div class="entry-progress-badge">${count} / ${ENTRY_PILOT_IDS.length} <span>ยืนยันแล้ว</span></div>
           <div class="entry-data-tools" title="สำรองและถ่ายโอนข้อมูล UAT ระหว่างเครื่อง">
             <button class="entry-data-btn" type="button" onclick="entryExportUatData()">ส่งออก UAT Data</button>
-            <button class="entry-data-btn" type="button" onclick="entryOpenImportUat()">นำเข้า UAT Data</button>
-            <input id="entryUatImportFile" type="file" accept=".json,application/json" style="display:none" onchange="entryHandleImportUat(this.files && this.files[0])">
+            <button class="entry-data-btn" type="button" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryOpenImportUat()">นำเข้า UAT Data</button>
+            <input id="entryUatImportFile" type="file" accept=".json,application/json" ${ENTRY_LOCKED ? 'disabled' : ''} style="display:none" onchange="entryHandleImportUat(this.files && this.files[0])">
           </div>
           <div class="entry-role-toggle">
             <button class="${entryState.role === 'owner' ? 'active' : ''}" onclick="entrySetRole('owner')">ผู้รับผิดชอบ KPI</button>
@@ -121,12 +125,13 @@ function entryHeaderHtml() {
           </div>
         </div>
       </div>
+      ${entryLockedBannerHtml()}
       ${entryState.role === 'admin' ? `
       <div class="entry-subnav">
         <button class="${entryState.view === 'form' ? 'active' : ''}" onclick="entrySetView('form')">กรอกข้อมูล</button>
         <button class="${entryState.view === 'confirm' ? 'active' : ''}" onclick="entrySetView('confirm')">ยืนยันข้อมูล (รอยืนยัน: ${entryPendingTotal()})</button>
         <button class="${entryState.view === 'criteria' ? 'active' : ''}" onclick="entrySetView('criteria')">จัดการเกณฑ์ MOU</button>
-        <button class="entry-reset-btn" onclick="entryDoReset()">🗑 รีเซ็ตข้อมูลทดสอบ Q3</button>
+        <button class="entry-reset-btn" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryDoReset()">🗑 รีเซ็ตข้อมูลทดสอบ Q3</button>
       </div>` : ''}
     </div>
   `;
@@ -152,7 +157,8 @@ function entryDoReset() {
   entryConfirmModal(
     'ยืนยันรีเซ็ตข้อมูลทดสอบ Q3 ทั้งหมด (การกรอก/สถานะรอยืนยัน/ผลยืนยันแล้ว/แผนที่ปรับ)?\nQ1/Q2, ประวัติการปรับเกณฑ์ MOU และกรอบเบิกจ่ายที่ยืนยันแล้วจะไม่ถูกกระทบ\n\nการกระทำนี้ย้อนกลับไม่ได้',
     () => {
-      resetQ3UatData();
+      const r = resetQ3UatData();
+      if (!r.ok) { entryToast(r.issues[0]); return; }
       entryState.activeChild = null;
       entryState.showFrameworkForm = false;
       entryState.showApRevisionFor = null;
@@ -192,12 +198,13 @@ function entryLeftListHtml() {
 // ═══════════════════════════════════════════════════════════
 function entryIssueBlockHtml(kpiId, monthKey, idPrefix) {
   const issue = getIssue(kpiId, monthKey);
+  const ro = ENTRY_LOCKED ? 'disabled' : '';
   return `<div class="entry-issue-block">
     <div class="entry-field-row col"><label>ปัญหา / อุปสรรค (ถ้ามี)</label>
-      <textarea class="entry-input" rows="2" id="${idPrefix}_obstacle" oninput="entryOnIssueInput('${kpiId}','${monthKey}','obstacle_text',this.value)" placeholder="ไม่บังคับกรอก">${entryEsc(issue.obstacle_text)}</textarea>
+      <textarea class="entry-input" rows="2" id="${idPrefix}_obstacle" ${ro} oninput="entryOnIssueInput('${kpiId}','${monthKey}','obstacle_text',this.value)" placeholder="ไม่บังคับกรอก">${entryEsc(issue.obstacle_text)}</textarea>
     </div>
     <div class="entry-field-row col"><label>แนวทางแก้ไข / การดำเนินการต่อ (ถ้ามี)</label>
-      <textarea class="entry-input" rows="2" id="${idPrefix}_solution" oninput="entryOnIssueInput('${kpiId}','${monthKey}','solution_text',this.value)" placeholder="ไม่บังคับกรอก">${entryEsc(issue.solution_text)}</textarea>
+      <textarea class="entry-input" rows="2" id="${idPrefix}_solution" ${ro} oninput="entryOnIssueInput('${kpiId}','${monthKey}','solution_text',this.value)" placeholder="ไม่บังคับกรอก">${entryEsc(issue.solution_text)}</textarea>
     </div>
   </div>`;
 }
@@ -211,20 +218,21 @@ function entryNumericFormHtml(kpiId) {
   const units = ENTRY_UNIT_OPTIONS[kpiId];
   const unitKey = entry.unit || (units ? units[0].key : 'default');
   const unitFactor = units ? (units.find(u => u.key === unitKey) || units[0]).factor : 1;
+  const ro = ENTRY_LOCKED ? 'disabled' : '';
 
   const rows = ENTRY_Q3_MONTHS.map(m => {
     const norm = entry.monthly[m.key];
     const display = (norm === null || norm === undefined) ? '' : (norm / unitFactor);
     return `<div class="entry-field-row">
       <label>${m.label}</label>
-      <input type="number" step="any" class="entry-input" value="${display}" placeholder="ยังไม่ได้กรอก"
+      <input type="number" step="any" class="entry-input" value="${display}" placeholder="ยังไม่ได้กรอก" ${ro}
         oninput="entryOnNumericInput('${kpiId}','${m.key}',this.value)">
     </div>`;
   }).join('');
 
   const unitSelector = units ? `<div class="entry-field-row">
       <label>หน่วยที่กรอก</label>
-      <select class="entry-input" onchange="entryOnUnitChange('${kpiId}', this.value)">
+      <select class="entry-input" ${ro} onchange="entryOnUnitChange('${kpiId}', this.value)">
         ${units.map(u => `<option value="${u.key}" ${u.key === unitKey ? 'selected' : ''}>${u.label}</option>`).join('')}
       </select>
     </div>` : '';
@@ -236,14 +244,14 @@ function entryNumericFormHtml(kpiId) {
       ${unitSelector}
       ${rows}
       <div class="entry-field-row col"><label>สรุปผลการดำเนินงาน Q3</label>
-        <textarea class="entry-input" rows="3" oninput="setEntry('${kpiId}', {summary_text:this.value,status:'draft'})" placeholder="อธิบายผลการดำเนินงาน สาเหตุ หรือประเด็นสำคัญ">${entryEsc(entry.summary_text || '')}</textarea>
+        <textarea class="entry-input" rows="3" ${ro} oninput="setEntry('${kpiId}', {summary_text:this.value,status:'draft'})" placeholder="อธิบายผลการดำเนินงาน สาเหตุ หรือประเด็นสำคัญ">${entryEsc(entry.summary_text || '')}</textarea>
       </div>
       ${entryIssueBlockHtml(kpiId, 'q3', 'iss_' + kpiId)}
       <div class="entry-note-small">เมื่อยืนยันบันทึก ระบบจะส่งผลสะสม คะแนน และข้อความชุดเดียวกันไปยังหน้ารายละเอียด ภาพรวม และ Home · การแก้ไขร่างจะยังไม่แทนผลที่ยืนยันครั้งล่าสุด</div>
       <div class="entry-btn-row">
-        <button class="entry-btn ghost" onclick="entrySaveDraft('${kpiId}')">บันทึกร่าง</button>
-        <button class="entry-btn secondary" onclick="entryValidate('${kpiId}')">ตรวจสอบข้อมูล</button>
-        <button class="entry-btn primary" onclick="entryConfirmNumeric('${kpiId}')">ยืนยันบันทึก</button>
+        <button class="entry-btn ghost" ${ro} onclick="entrySaveDraft('${kpiId}')">บันทึกร่าง</button>
+        <button class="entry-btn secondary" ${ro} onclick="entryValidate('${kpiId}')">ตรวจสอบข้อมูล</button>
+        <button class="entry-btn primary" ${ro} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryConfirmNumeric('${kpiId}')">ยืนยันบันทึก</button>
       </div>
       <div id="entryValidationBox_${kpiId}"></div>
     </div>
@@ -306,7 +314,7 @@ function entryAnnualFrameworkPanel() {
       ${active.sourceNote ? `<div class="entry-framework-source">${entryEsc(active.sourceNote)}</div>` : ''}
       ${pending
         ? `<div class="entry-todo-note">⏳ มีคำขอปรับกรอบเป็น <b>${Number(pending.amount).toLocaleString('en-US', { maximumFractionDigits: 3 })} ล้านบาท</b> (มีผลตั้งแต่ ${entryThaiDate(pending.effectiveDate)}) — รอผู้ดูแลระบบยืนยัน</div>`
-        : `<div class="entry-btn-row"><button class="entry-btn ghost small" onclick="entryToggleFrameworkForm()">${entryState.showFrameworkForm ? 'ยกเลิก' : 'แจ้งปรับกรอบเบิกจ่าย'}</button></div>`}
+        : `<div class="entry-btn-row"><button class="entry-btn ghost small" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryToggleFrameworkForm()">${entryState.showFrameworkForm ? 'ยกเลิก' : 'แจ้งปรับกรอบเบิกจ่าย'}</button></div>`}
       <div id="entryFrameworkRevisionForm">${(entryState.showFrameworkForm && !pending) ? entryFrameworkRevisionFormHtml(active) : ''}</div>
       ${hist.length > 1 ? `<details class="entry-framework-history"><summary>ประวัติเวอร์ชัน (${hist.length})</summary>
         <table class="dtl-qtable"><thead><tr><th>เวอร์ชัน</th><th>จำนวน (ล้านบาท)</th><th>มีผลตั้งแต่</th><th>สถานะ</th><th>เหตุผล / หมายเหตุ</th><th>เอกสาร</th></tr></thead>
@@ -320,16 +328,17 @@ function entryAnnualFrameworkPanel() {
   `;
 }
 function entryFrameworkRevisionFormHtml(active) {
+  const ro = ENTRY_LOCKED ? 'disabled' : '';
   return `<div class="entry-revision-form">
     <div class="entry-field-row"><label>กรอบเดิม</label><input class="entry-input" value="${active.amount.toLocaleString('en-US', { maximumFractionDigits: 3 })} ล้านบาท" disabled></div>
-    <div class="entry-field-row"><label>กรอบใหม่ (ล้านบาท)</label><input type="number" step="any" class="entry-input" id="fwNewAmount"></div>
-    <div class="entry-field-row"><label>มีผลตั้งแต่</label><input type="date" class="entry-input" style="max-width:200px" id="fwEffectiveDate"></div>
-    <div class="entry-field-row col"><label>เหตุผลในการปรับ</label><textarea class="entry-input" rows="2" id="fwReason" placeholder="เช่น ปรับตามหนังสือกระทรวง..."></textarea></div>
-    <div class="entry-field-row"><label>หน่วยงาน / หนังสืออ้างอิง</label><input class="entry-input" id="fwReferenceDoc"></div>
-    <div class="entry-field-row"><label>เอกสารประกอบ (Google Drive URL)</label><input class="entry-input" id="fwEvidenceUrl" placeholder="https://drive.google.com/..."></div>
+    <div class="entry-field-row"><label>กรอบใหม่ (ล้านบาท)</label><input type="number" step="any" class="entry-input" id="fwNewAmount" ${ro}></div>
+    <div class="entry-field-row"><label>มีผลตั้งแต่</label><input type="date" class="entry-input" style="max-width:200px" id="fwEffectiveDate" ${ro}></div>
+    <div class="entry-field-row col"><label>เหตุผลในการปรับ</label><textarea class="entry-input" rows="2" id="fwReason" placeholder="เช่น ปรับตามหนังสือกระทรวง..." ${ro}></textarea></div>
+    <div class="entry-field-row"><label>หน่วยงาน / หนังสืออ้างอิง</label><input class="entry-input" id="fwReferenceDoc" ${ro}></div>
+    <div class="entry-field-row"><label>เอกสารประกอบ (Google Drive URL)</label><input class="entry-input" id="fwEvidenceUrl" placeholder="https://drive.google.com/..." ${ro}></div>
     <div class="entry-btn-row">
       <button class="entry-btn ghost" onclick="entryToggleFrameworkForm()">ยกเลิก</button>
-      <button class="entry-btn primary" onclick="entrySubmitFrameworkRevision()">ส่งคำขอปรับกรอบ</button>
+      <button class="entry-btn primary" ${ro} onclick="entrySubmitFrameworkRevision()">ส่งคำขอปรับกรอบ</button>
     </div>
     <div id="entryFwMsg"></div>
   </div>`;
@@ -354,12 +363,13 @@ function entryInvestmentFormHtml() {
   const kpiId = ENTRY_INVESTMENT_KPI;
   const raw = getInvestmentRaw();
   const result = computeInvestmentResult();
+  const ro = ENTRY_LOCKED ? 'disabled' : '';
 
   const rows = ENTRY_Q3_MONTHS.map(m => `
     <tr>
       <td>${m.label}</td>
-      <td><input type="number" step="any" class="entry-input" value="${raw[m.key].plan ?? ''}" placeholder="ล้านบาท" oninput="entryOnInvestmentInput('${m.key}','plan',this.value)"></td>
-      <td><input type="number" step="any" class="entry-input" value="${raw[m.key].actual ?? ''}" placeholder="ล้านบาท" oninput="entryOnInvestmentInput('${m.key}','actual',this.value)"></td>
+      <td><input type="number" step="any" class="entry-input" value="${raw[m.key].plan ?? ''}" placeholder="ล้านบาท" ${ro} oninput="entryOnInvestmentInput('${m.key}','plan',this.value)"></td>
+      <td><input type="number" step="any" class="entry-input" value="${raw[m.key].actual ?? ''}" placeholder="ล้านบาท" ${ro} oninput="entryOnInvestmentInput('${m.key}','actual',this.value)"></td>
     </tr>`).join('');
 
   return `
@@ -373,9 +383,9 @@ function entryInvestmentFormHtml() {
       </table>
       ${entryIssueBlockHtml(kpiId, 'q3', 'iss_' + kpiId)}
       <div class="entry-btn-row">
-        <button class="entry-btn ghost" onclick="entrySaveDraft()">บันทึกร่าง</button>
-        <button class="entry-btn secondary" onclick="entryValidateInvestment()">ตรวจสอบข้อมูล</button>
-        <button class="entry-btn primary" onclick="entryConfirmInvestment()">ยืนยันบันทึก</button>
+        <button class="entry-btn ghost" ${ro} onclick="entrySaveDraft()">บันทึกร่าง</button>
+        <button class="entry-btn secondary" ${ro} onclick="entryValidateInvestment()">ตรวจสอบข้อมูล</button>
+        <button class="entry-btn primary" ${ro} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryConfirmInvestment()">ยืนยันบันทึก</button>
       </div>
       <div id="entryValidationBox_1.1"></div>
     </div>
@@ -480,19 +490,20 @@ function entryActionPlanBlockHtml(kpiId) {
         <table class="dtl-qtable"><thead><tr><th>ปรับเมื่อ</th><th>เหตุผล</th></tr></thead>
         <tbody>${plan.revisionHistory.map(h => `<tr><td>${entryThaiDate(h.revisedAt ? h.revisedAt.slice(0, 10) : null)}</td><td>${entryEsc(h.reason || '')}</td></tr>`).join('')}</tbody></table>
       </details>` : ''}
-      <div class="entry-btn-row"><button class="entry-btn ghost small" onclick="entryToggleApRevisionForm('${kpiId}')">${entryState.showApRevisionFor === kpiId ? 'ยกเลิก' : 'ขอปรับแผนการดำเนินงาน'}</button></div>
+      <div class="entry-btn-row"><button class="entry-btn ghost small" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryToggleApRevisionForm('${kpiId}')">${entryState.showApRevisionFor === kpiId ? 'ยกเลิก' : 'ขอปรับแผนการดำเนินงาน'}</button></div>
       <div id="entryApRevisionForm_${kpiId}">${entryState.showApRevisionFor === kpiId ? entryActionPlanRevisionFormHtml(kpiId, activities) : ''}</div>
     </div>
   `;
 }
 function entryActionPlanRevisionFormHtml(kpiId, activities) {
+  const ro = ENTRY_LOCKED ? 'disabled' : '';
   return `<div class="entry-revision-form">
-    ${activities.map((a, i) => `<div class="entry-field-row"><label>${entryEsc(a.activity_name)}</label><input type="number" step="any" class="entry-input" style="max-width:100px" id="apPct_${kpiId}_${i}" value="${a.expected_progress_percent ?? ''}"> %</div>`).join('')}
-    <div class="entry-field-row col"><label>เหตุผลในการปรับแผน</label><textarea class="entry-input" rows="2" id="apReason_${kpiId}" placeholder="บังคับกรอก"></textarea></div>
-    <div class="entry-field-row"><label>เอกสารประกอบ (Google Drive URL, ถ้ามี)</label><input class="entry-input" id="apEvidence_${kpiId}"></div>
+    ${activities.map((a, i) => `<div class="entry-field-row"><label>${entryEsc(a.activity_name)}</label><input type="number" step="any" class="entry-input" style="max-width:100px" id="apPct_${kpiId}_${i}" value="${a.expected_progress_percent ?? ''}" ${ro}> %</div>`).join('')}
+    <div class="entry-field-row col"><label>เหตุผลในการปรับแผน</label><textarea class="entry-input" rows="2" id="apReason_${kpiId}" placeholder="บังคับกรอก" ${ro}></textarea></div>
+    <div class="entry-field-row"><label>เอกสารประกอบ (Google Drive URL, ถ้ามี)</label><input class="entry-input" id="apEvidence_${kpiId}" ${ro}></div>
     <div class="entry-btn-row">
       <button class="entry-btn ghost" onclick="entryToggleApRevisionForm('${kpiId}')">ยกเลิก</button>
-      <button class="entry-btn primary" onclick="entrySubmitApRevision('${kpiId}')">บันทึกแผนที่ปรับ</button>
+      <button class="entry-btn primary" ${ro} onclick="entrySubmitApRevision('${kpiId}')">บันทึกแผนที่ปรับ</button>
     </div>
     <div id="entryApMsg_${kpiId}"></div>
   </div>`;
@@ -529,7 +540,7 @@ function entryPlanFormHtml(kpiId) {
   const monthPlan = getActionPlanMonthly(kpiId)[activeMonth];
 
   const m = entry.monthly[activeMonth];
-  const locked = m.submission_status !== 'draft';
+  const locked = ENTRY_LOCKED || m.submission_status !== 'draft';
   const suggestion = suggestForPlanKpi(kpiId, m.progress_text, m.reported_percent);
 
   const evidenceList = m.evidence_links.length
@@ -591,8 +602,8 @@ function entryPlanFormHtml(kpiId) {
       <div class="entry-plan-status">สถานะ: <b>${entryPlanStatusLabel(m.submission_status)}</b>${m.submitted_at ? ` · ส่งเมื่อ ${new Date(m.submitted_at).toLocaleString('th-TH')}` : ''}</div>
 
       <div class="entry-btn-row">
-        <button class="entry-btn ghost" ${locked ? 'disabled' : ''} onclick="entrySaveDraft()">บันทึกร่าง</button>
-        <button class="entry-btn primary" ${locked ? 'disabled' : ''} onclick="entrySubmitPlan('${kpiId}','${activeMonth}')">ส่งข้อมูล (Submit)</button>
+        <button class="entry-btn ghost" ${locked ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entrySaveDraft()">บันทึกร่าง</button>
+        <button class="entry-btn primary" ${locked ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entrySubmitPlan('${kpiId}','${activeMonth}')">ส่งข้อมูล (Submit)</button>
       </div>
       <div id="entryValidationBox_${kpiId}"></div>
     </div>
@@ -773,8 +784,8 @@ function entryFrameworkPendingCardHtml(rev) {
       <div style="grid-column:1/-1"><div class="dtl-support-label">เอกสารประกอบ</div><div class="dtl-support-val"><a href="${entryEsc(rev.evidenceUrl)}" target="_blank" rel="noopener">เปิดเอกสาร ↗</a></div></div>
     </div>
     <div class="entry-btn-row">
-      <button class="entry-btn primary" onclick="entryDoConfirmFramework('${rev.kpiId}',${rev.version})">ยืนยันการปรับกรอบ</button>
-      <button class="entry-btn ghost" onclick="entryDoRejectFramework('${rev.kpiId}',${rev.version})">ส่งกลับแก้ไข</button>
+      <button class="entry-btn primary" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryDoConfirmFramework('${rev.kpiId}',${rev.version})">ยืนยันการปรับกรอบ</button>
+      <button class="entry-btn ghost" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryDoRejectFramework('${rev.kpiId}',${rev.version})">ส่งกลับแก้ไข</button>
     </div>
     <div id="entryFwConfirmMsg_${rev.version}"></div>
   </div>`;
@@ -822,21 +833,21 @@ function entryConfirmViewHtml() {
       </details>` : ''}
       <div class="entry-field-row" style="margin-top:10px">
         <label>confirmed_percent (%)</label>
-        <input type="number" min="0" max="100" step="any" class="entry-input" style="max-width:140px" id="cf_pct_${p.kpiId}_${p.monthKey}" value="${p.month.reported_percent ?? ''}">
+        <input type="number" min="0" max="100" step="any" class="entry-input" style="max-width:140px" id="cf_pct_${p.kpiId}_${p.monthKey}" value="${p.month.reported_percent ?? ''}" ${ENTRY_LOCKED ? 'disabled' : ''}>
       </div>
       ${needsLevel ? `<div class="entry-field-row">
         <label>Level (มาตราวัดพิเศษ — เลือกเอง 1-5)</label>
-        <select class="entry-input" style="max-width:140px" id="cf_level_${p.kpiId}_${p.monthKey}">
+        <select class="entry-input" style="max-width:140px" id="cf_level_${p.kpiId}_${p.monthKey}" ${ENTRY_LOCKED ? 'disabled' : ''}>
           <option value="">— เลือก —</option>${[1,2,3,4,5].map(l => `<option value="${l}">${l}</option>`).join('')}
         </select>
       </div>` : ''}
       <div class="entry-field-row col">
         <label>confirmation_note</label>
-        <textarea class="entry-input" rows="2" id="cf_note_${p.kpiId}_${p.monthKey}" placeholder="เหตุผลการปรับ (ถ้ามี)"></textarea>
+        <textarea class="entry-input" rows="2" id="cf_note_${p.kpiId}_${p.monthKey}" placeholder="เหตุผลการปรับ (ถ้ามี)" ${ENTRY_LOCKED ? 'disabled' : ''}></textarea>
       </div>
       <div class="entry-btn-row">
-        <button class="entry-btn primary" onclick="entryDoConfirmPlan('${p.kpiId}','${p.monthKey}')">ยืนยันผล</button>
-        <button class="entry-btn ghost" onclick="entryDoSendBackPlan('${p.kpiId}','${p.monthKey}')">ส่งกลับแก้ไข</button>
+        <button class="entry-btn primary" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryDoConfirmPlan('${p.kpiId}','${p.monthKey}')">ยืนยันผล</button>
+        <button class="entry-btn ghost" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entryDoSendBackPlan('${p.kpiId}','${p.monthKey}')">ส่งกลับแก้ไข</button>
       </div>
       <div id="entryConfirmMsg_${p.kpiId}_${p.monthKey}"></div>
     </div>`;
@@ -884,6 +895,7 @@ function entryCriteriaViewHtml() {
       <div class="card-title">จัดการเกณฑ์ MOU (Level 1-5) — Locked, แก้ได้เฉพาะผู้ดูแลระบบผ่านมติ กทท.</div>
       <div class="entry-meta-line">แหล่งข้อมูล: MOU Master ต่อตัวชี้วัด (per KPI ID) — ไม่ใช้ค่าเกณฑ์ร่วม/ค่ากลาง</div>
       <div class="entry-field-row"><label>เลือกตัวชี้วัด</label><select class="entry-input" onchange="entrySetCriteriaKpi(this.value)">${opts}</select></div>
+      ${entryLockedBannerHtml()}
       ${conflict ? `<div class="entry-todo-note">⚠ ${entryEsc(conflict)}</div>` : ''}
       <div class="dtl-support-label" style="margin-top:8px">เกณฑ์ปัจจุบัน (v${active.version})</div>
       <table class="dtl-criteria-table"><thead><tr>${[1,2,3,4,5].map(l => `<th>Level ${l}</th>`).join('')}</tr></thead>
@@ -902,12 +914,12 @@ function entryCriteriaViewHtml() {
 
       <div class="dtl-support-label" style="margin-top:14px">สร้างเกณฑ์เวอร์ชันใหม่ (บังคับกรอกครบทุกช่อง)</div>
       <div class="entry-crit-grid">
-        ${[0,1,2,3,4].map(i => `<div class="entry-field-row"><label>Level ${i + 1}</label><input type="number" step="any" class="entry-input" id="critNew_${i}" value="${active.thresholds[i]}"></div>`).join('')}
+        ${[0,1,2,3,4].map(i => `<div class="entry-field-row"><label>Level ${i + 1}</label><input type="number" step="any" class="entry-input" id="critNew_${i}" value="${active.thresholds[i]}" ${ENTRY_LOCKED ? 'disabled' : ''}></div>`).join('')}
       </div>
-      <div class="entry-field-row"><label>วันที่คณะกรรมการ กทท. เห็นชอบ</label><input type="date" class="entry-input" style="max-width:200px" id="critBoardDate"></div>
-      <div class="entry-field-row col"><label>หมายเหตุ</label><textarea class="entry-input" rows="2" id="critNote" placeholder="เหตุผล/มติที่เกี่ยวข้อง"></textarea></div>
-      <div class="entry-field-row"><label>เอกสารอ้างอิง (Google Drive URL)</label><input class="entry-input" id="critEvidence" placeholder="https://drive.google.com/..."></div>
-      <div class="entry-btn-row"><button class="entry-btn primary" onclick="entrySaveCriteriaRevision('${id}')">บันทึกเกณฑ์เวอร์ชันใหม่</button></div>
+      <div class="entry-field-row"><label>วันที่คณะกรรมการ กทท. เห็นชอบ</label><input type="date" class="entry-input" style="max-width:200px" id="critBoardDate" ${ENTRY_LOCKED ? 'disabled' : ''}></div>
+      <div class="entry-field-row col"><label>หมายเหตุ</label><textarea class="entry-input" rows="2" id="critNote" placeholder="เหตุผล/มติที่เกี่ยวข้อง" ${ENTRY_LOCKED ? 'disabled' : ''}></textarea></div>
+      <div class="entry-field-row"><label>เอกสารอ้างอิง (Google Drive URL)</label><input class="entry-input" id="critEvidence" placeholder="https://drive.google.com/..." ${ENTRY_LOCKED ? 'disabled' : ''}></div>
+      <div class="entry-btn-row"><button class="entry-btn primary" ${ENTRY_LOCKED ? 'disabled' : ''} title="${ENTRY_LOCKED ? ENTRY_LOCK_TOOLTIP : ''}" onclick="entrySaveCriteriaRevision('${id}')">บันทึกเกณฑ์เวอร์ชันใหม่</button></div>
       <div id="entryCritMsg"></div>
     </div>
   `;
