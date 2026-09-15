@@ -255,7 +255,7 @@ function logPeriodBlocked_(action, kpiId, quarter, code, requestId, actorName) {
 function checkAuth_(token) {
   const expected = PropertiesService.getScriptProperties().getProperty('MOU69_WRITE_TOKEN');
   if (!expected || !token) return false;
-  return String(token) === String(expected);
+  return String(token).trim() === String(expected).trim();
 }
 
 function validRequestId_(id) { return typeof id === 'string' && id.length >= 4 && id.length <= 128; }

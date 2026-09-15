@@ -145,7 +145,8 @@
   }
 
   testBtn.addEventListener('click', function () {
-    var token = tokenMemory || tokenInput.value;
+    var token = tokenInput.value.trim();
+    storeToken(token);
     testBtn.disabled = true;
     resultBox.style.display = 'none';
     setStatus('testing', 'กำลังทดสอบ... (Testing...)');
